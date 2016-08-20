@@ -1,0 +1,116 @@
+<!DOCTYPE HTML>
+<html>
+
+<head>
+  <meta charset="UTF-8">
+  <title>YoutubeShows</title>
+  <script type="text/javascript" src="shows.js"></script>
+  <link rel="stylesheet" href="shows.css">
+</head>
+
+<body>
+</body>
+
+<script type="text/javascript">
+var youtubeShows = Elm.YoutubeShows.fullscreen(null);
+
+function fetchYT(collection, options, cb){
+  var maxResults = options.maxResults;
+  if (!maxResults || maxResults > 50) options.maxResults = 50;
+  gapi.client.youtube[collection].list(options).then(function(response){
+    cb(response.result.items);
+    var nextPageToken = response.result.nextPageToken;
+    if (nextPageToken && (maxResults === undefined || maxResults > 50)) {
+      options.pageToken = nextPageToken;
+      options.maxResults = maxResults ? maxResults - 50 : undefined;
+      fetchYT(collection, options, cb);
+    } else {
+      cb();
+    }
+  });
+}
+
+youtubeShows.ports.requestYTSubscribedChannels.subscribe(function(){
+  var subscriptions = [];
+  fetchYT(
+    'subscriptions',
+    { part: 'snippet', mine: true, ordered: 'unread' },
+    function(subscriptionItems){
+      if (!subscriptionItems) return;
+      var channelIds = subscriptionItems.map((function(item){ return item.snippet.resourceId.channelId; }));
+
+      fetchYT(
+        'channels',
+        { part: 'contentDetails', id: channelIds.join(',') },
+        function(channelItems){
+          if (!channelItems) return;
+          subscriptions = subscriptions.concat(
+            channelItems.map(function(item){
+              var subscription = subscriptionItems.find(function(sub){ return sub.snippet.resourceId.channelId === item.id; })
+              return {
+                title: subscription.snippet.title,
+                channelId: item.id,
+                thumbnailUrl: subscription.snippet.thumbnails.default.url,
+                uploadPlaylist: item.contentDetails.relatedPlaylists.uploads
+              }
+            })
+          );
+          youtubeShows.ports.subscribedChannels.send(subscriptions);
+        }
+      )
+    }
+  )
+});
+youtubeShows.ports.requestYTVideos.subscribe(function(channelId){
+
+});
+
+youtubeShows.ports.authorize.subscribe(function(){
+  console.log('authorize', arguments);
+  promiseAuthorization()
+  .then(
+    ()=> youtubeShows.ports.gotAuthorization.send(null),
+    ()=> youtubeShows.ports.failedAuthorization.send(null)
+  )
+});
+
+function promiseGapi(){
+  return new Promise(function(resolve){
+    var script = document.createElement('script');
+    var callbackName = '_Pgapi_clientLoadedCallback';
+    script.src = 'https://apis.google.com/js/client.js?onload='+callbackName;
+    window[callbackName] = resolve;
+    document.body.appendChild(script);
+  });
+}
+function promiseYoutube(){
+  return promiseGapi().then(function(){
+    return new Promise(function(resolve){
+      gapi.client.load('youtube', 'v3', resolve);
+    });
+  });
+}
+function promiseAuthorization(){
+  function authorize(immediate){
+    return new Promise(function(resolve, reject){
+      gapi.auth.authorize({
+        client_id: '699114606672',
+        scope: 'https://www.googleapis.com/auth/youtube',
+        immediate
+      }, function(authResult){
+        if (authResult && !authResult.error){
+          resolve(authResult.expires_at);
+        } else {
+          console.log('authResult', window.authResult = authResult);
+          reject();
+        }
+      });
+    });
+  }
+  return promiseYoutube().then(function(){
+    return authorize(true).catch(authorize.bind(null, false));
+  });
+}
+</script>
+
+</html>

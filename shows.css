@@ -1,0 +1,29 @@
+html, body { height: 100%; }
+body { margin: 0; }
+
+.vertical-layout {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.horizontal-layout {
+  display: flex;
+}
+
+.expand-layout {
+  flex-grow: 1;
+}
+
+.scroll-vertically {
+  overflow-y: auto;
+}
+
+.align-text-right {
+  text-align: right;
+}
+
+.no-list {
+  list-style-type: none;
+  margin: 0;
+  padding: 0;
+}
