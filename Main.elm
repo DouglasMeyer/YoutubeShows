@@ -3,6 +3,7 @@ port module YoutubeShows exposing (..)
 import Html exposing (..)
 import Html.App as App
 import Html.Attributes exposing (..)
+import Time exposing (Time)
 
 main : Program (Maybe Model)
 main =
@@ -13,9 +14,9 @@ main =
     , subscriptions = subscriptions
     }
 
-port authorize : String -> Cmd msg
+port authorize : () -> Cmd msg
 
-port requestYTSubscribedChannels : String -> Cmd msg
+port requestYTSubscribedChannels : () -> Cmd msg
 
 port requestYTVideos : String -> Cmd msg
 
@@ -23,6 +24,7 @@ port requestYTVideos : String -> Cmd msg
 -- MODEL
 type alias Model =
   { authorized : Bool
+  , lastAuthCheck : Time
   , subscriptions : Subscriptions
   , channels: List Channel
   }
@@ -54,6 +56,7 @@ type alias Video =
 emptyModel : Model
 emptyModel =
   { authorized = False
+  , lastAuthCheck = 0
   , subscriptions =
     { subscriptions = []
     , isFetching = True
@@ -63,12 +66,13 @@ emptyModel =
 
 init : a -> ( Model, Cmd Msg )
 init _ =
-  ( emptyModel, Cmd.batch [ authorize "Blah" ] )
+  emptyModel ! []
 
 -- UPDATE
 
 type Msg
   = NoOp
+  | Tick Time
   | SetAuthorization Bool
   | SetSubscribedChannels ( List Subscription )
 
@@ -78,8 +82,16 @@ update msg model =
     NoOp ->
       model ! []
 
+    Tick now ->
+      if (model.authorized == False) && (now - model.lastAuthCheck) > Time.minute then
+        { model
+          | lastAuthCheck = now
+        } ! [ authorize () ]
+      else
+        model ! []
+
     SetAuthorization authorized ->
-      { model | authorized = authorized } ! [ requestYTSubscribedChannels "Blah" ]
+      { model | authorized = authorized } ! [ requestYTSubscribedChannels () ]
 
     SetSubscribedChannels subscriptions ->
       { model
@@ -100,7 +112,8 @@ port subscribedChannels : (List Subscription -> msg) -> Sub msg
 subscriptions : Model -> Sub Msg
 subscriptions model =
   Sub.batch
-    [ gotAuthorization (\_ -> SetAuthorization True)
+    [ Time.every Time.second Tick
+    , gotAuthorization (\_ -> SetAuthorization True)
     , failedAuthorization (\_ -> SetAuthorization False)
     , subscribedChannels SetSubscribedChannels
     ]
