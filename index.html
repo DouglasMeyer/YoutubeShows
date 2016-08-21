@@ -12,7 +12,7 @@
 </body>
 
 <script type="text/javascript">
-var youtubeShows = Elm.YoutubeShows.fullscreen(null);
+var youtubeShows = Elm.YoutubeShows.fullscreen();
 
 function fetchYT(collection, options, cb){
   var maxResults = options.maxResults;
@@ -31,7 +31,6 @@ function fetchYT(collection, options, cb){
 }
 
 youtubeShows.ports.requestYTSubscribedChannels.subscribe(function(){
-  var subscriptions = [];
   fetchYT(
     'subscriptions',
     { part: 'snippet', mine: true, ordered: 'unread' },
@@ -44,25 +43,70 @@ youtubeShows.ports.requestYTSubscribedChannels.subscribe(function(){
         { part: 'contentDetails', id: channelIds.join(',') },
         function(channelItems){
           if (!channelItems) return;
-          subscriptions = subscriptions.concat(
+          youtubeShows.ports.subscribedChannels.send(
             channelItems.map(function(item){
               var subscription = subscriptionItems.find(function(sub){ return sub.snippet.resourceId.channelId === item.id; })
               return {
+                id: item.id,
                 title: subscription.snippet.title,
-                channelId: item.id,
                 thumbnailUrl: subscription.snippet.thumbnails.default.url,
-                uploadPlaylist: item.contentDetails.relatedPlaylists.uploads
+                uploadPlaylist: item.contentDetails.relatedPlaylists.uploads,
+                videos: []
               }
             })
           );
-          youtubeShows.ports.subscribedChannels.send(subscriptions);
         }
       )
     }
   )
 });
-youtubeShows.ports.requestYTVideos.subscribe(function(channelId){
 
+youtubeShows.ports.requestYTVideos.subscribe(function(playlistIds){
+  var videoIds = [];
+
+  Promise.all(playlistIds.map(function(playlistId){
+    return new Promise(function(resolve){
+      fetchYT(
+        'playlistItems',
+        { part: 'contentDetails', playlistId: playlistId, maxResults: 10 },
+        function(playlistItems){
+          if (!playlistItems) return;
+
+          videoIds = videoIds.concat(
+            playlistItems.map(function(item){
+              return item.contentDetails.videoId;
+            })
+          );
+          checkFetchVideos();
+          resolve();
+        }
+      );
+    });
+  })).then(function(){ checkFetchVideos(true); });
+
+  function checkFetchVideos(force){
+    if (!force && videoIds.length < 50) return;
+
+    fetchYT(
+      'videos',
+      { part: 'snippet', id: videoIds.splice(0,50).join(',') },
+      function(videoItems){
+        if (!videoItems) return;
+
+        youtubeShows.ports.channelVideos.send(
+          videoItems.map(function(item){
+            return {
+              id: item.id,
+              channelId: item.snippet.channelId,
+              title: item.snippet.title,
+              thumbnailUrl: item.snippet.thumbnails.default.url,
+              publishedAt: item.snippet.publishedAt
+            };
+          })
+        );
+      }
+    );
+  }
 });
 
 youtubeShows.ports.authorize.subscribe(function(){
