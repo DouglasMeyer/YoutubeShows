@@ -27,6 +27,7 @@ type alias Model =
   , lastAuthCheck : Time
   , lastChannelFetch : Time
   , lastVideosFetch : Time
+  , timeTilNextVideosFetch : Float
   , channels: Dict String Channel
   , selectedChannelId: Maybe String
   }
@@ -53,6 +54,7 @@ emptyModel =
   , lastAuthCheck = 0
   , lastChannelFetch = 0
   , lastVideosFetch = 0
+  , timeTilNextVideosFetch = 0
   , channels = Dict.empty
   , selectedChannelId = Nothing
   }
@@ -77,32 +79,41 @@ update msg model =
       model ! []
 
     Tick now ->
-      if (model.isAuthorized == False) && (now - model.lastAuthCheck) > Time.minute then
-        { model
-          | lastAuthCheck = now
-        } ! [ authorize () ]
-      else if model.isAuthorized && (now - model.lastChannelFetch) > Time.hour * 16 then
-        { model
-          | lastChannelFetch = now
-        } ! [ requestYTSubscribedChannels () ]
-      else if model.isAuthorized && (now - model.lastVideosFetch) > Time.minute * 20 then
-        let
-          channelIds = model.channels
-            |> Dict.values
-            |> List.map .uploadPlaylist
-        in
+      let
+        timeTilNextVideosFetch = (model.lastVideosFetch + Time.minute * 20) - now
+      in
+        if (model.isAuthorized == False) && (now - model.lastAuthCheck) > Time.minute then
           { model
-            | lastVideosFetch = now
-          } ! [ requestYTVideos channelIds ]
-      else
-        model ! []
+            | lastAuthCheck = now
+            , timeTilNextVideosFetch = timeTilNextVideosFetch
+          } ! [ authorize () ]
+        else if model.isAuthorized && (now - model.lastChannelFetch) > Time.hour * 16 then
+          { model
+            | lastChannelFetch = now
+            , timeTilNextVideosFetch = timeTilNextVideosFetch
+          } ! [ requestYTSubscribedChannels () ]
+        else if model.isAuthorized && timeTilNextVideosFetch <= 0 then
+          let
+            channelIds = model.channels
+              |> Dict.values
+              |> List.map .uploadPlaylist
+          in
+            { model
+              | lastVideosFetch = now
+              , timeTilNextVideosFetch = timeTilNextVideosFetch
+            } ! [ requestYTVideos channelIds ]
+        else
+          { model
+          | timeTilNextVideosFetch = timeTilNextVideosFetch
+          } ! []
 
     SetAuthorization isAuthorized ->
-      { model | isAuthorized = isAuthorized } ! [ requestYTSubscribedChannels () ]
+      { model | isAuthorized = isAuthorized } ! []
 
     AddSubscribedChannels channels ->
       { model
         | channels = List.foldr updateChannelsWithChannels model.channels channels
+        , lastVideosFetch = 0
       } ! []
 
     AddVideos videos ->
@@ -176,6 +187,7 @@ viewHeader model =
   div
     [ class "horizontal-layout do-not-shrink" ]
     [ header [] [ text "YoutubeShows" ]
+    , div [ class "expanded-layout align-text-center" ] [ text ("Next fetch " ++ toString (round (model.timeTilNextVideosFetch / 1000))) ]
     , div [ class "expand-layout align-text-right" ] [ text (if model.isAuthorized then "Authorized" else "Not Authorized") ]
     ]
 
