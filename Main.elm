@@ -107,7 +107,7 @@ init startingState =
       { emptyModel
         | authorization = Nothing
         , selectedChannelId = stored.selectedChannelId
-        , channels = List.foldr updateChannelsWithChannels emptyModel.channels stored.channels
+        , channels = addChannelsToChannels stored.channels emptyModel.channels
       } ! [ Time.now
         |> Task.perform (\now -> NoOp) (\now -> AuthWithToken stored.authorization now)
       ]
@@ -147,14 +147,14 @@ update msg model =
           } ! [ requestYTSubscribedChannels () ]
         else if isAuthorized && timeTillNextVideosFetch <= 0 then
           let
-            channelIds = model.channels
+            channelPlaylistIds = model.channels
               |> Dict.values
               |> List.map .uploadPlaylist
           in
             { model
               | lastVideosFetch = now
               , timeTillNextVideosFetch = timeTillNextVideosFetch
-            } ! [ requestYTVideos channelIds ]
+            } ! [ requestYTVideos channelPlaylistIds ]
         else
           { model
           | timeTillNextVideosFetch = timeTillNextVideosFetch
@@ -170,44 +170,53 @@ update msg model =
 
     AddSubscribedChannels channels ->
       { model
-        | channels = List.foldr updateChannelsWithChannels model.channels channels
+        | channels = addChannelsToChannels channels model.channels
         , lastVideosFetch = 0
       } ! []
 
     AddVideos videos ->
       { model
-        | channels = List.foldr updateChannelsWithVideo model.channels videos
+        | channels = addVideosToChannels videos model.channels
       } ! []
 
     SelectChannel channelId ->
       { model | selectedChannelId = channelId } ! []
 
 
-updateChannelsWithChannels : Channel -> Dict String Channel -> Dict String Channel
-updateChannelsWithChannels channel channels =
-  case Dict.get channel.id channels of
-    Nothing ->
-      Dict.insert channel.id channel channels
-    Just existingChannel ->
-      Dict.insert channel.id ({ channel
-        | videos = existingChannel.videos
-      }) channels
+addChannelsToChannels : List Channel -> Dict String Channel -> Dict String Channel
+addChannelsToChannels newChannels channels =
+  List.foldl
+    (\newChannel channels -> case Dict.get newChannel.id channels of
+      Nothing -> Dict.insert newChannel.id newChannel channels
+      Just existingChannel ->
+        Dict.insert
+          newChannel.id
+          { newChannel | videos = existingChannel.videos }
+          channels
+    )
+    channels
+    newChannels
 
-updateChannelsWithVideo : Video -> Dict String Channel -> Dict String Channel
-updateChannelsWithVideo video channels =
-  case Dict.get video.channelId channels of
-    Nothing ->
-      channels
-
-    Just channel ->
-      Dict.insert channel.id (
-        { channel
-          | videos = if List.member video channel.videos then
-              channel.videos
-            else
-              video :: channel.videos
+addVideosToChannels : List Video -> Dict String Channel -> Dict String Channel
+addVideosToChannels videos channels =
+  List.foldl
+    (\newVideo channels -> case Dict.get newVideo.channelId channels of
+      Nothing -> channels
+      Just channel ->
+        Dict.insert
+          newVideo.channelId
+          { channel
+            | videos = case findById newVideo.id channel.videos of
+              Nothing -> newVideo :: channel.videos
+              Just _ ->
+                List.map
+                  (\video -> if video.id == newVideo.id then newVideo else video)
+                  channel.videos
           }
-        ) channels
+          channels
+    )
+    channels
+    videos
 
 
 -- SUBSCRIPTIONS
@@ -267,7 +276,7 @@ viewChannelList selectedChannelId channels =
           [ onClick (SelectChannel (Just channel.id)), class (if Just channel.id == selectedChannelId then "selected vertical-margin" else "clickable vertical-margin")
           , style [("font-size", "0")]
           ]
-          [ img [ src channel.thumbnailUrl, title channel.title, width 88, height 88 ] []
+          [ img [ src channel.thumbnailUrl, title channel.title, alt channel.title, width 88, height 88 ] []
           ]
       )
       (Dict.values channels)
@@ -295,7 +304,7 @@ viewVideosList selectedChannelId channels =
               Nothing ->
                 src "//s.ytimg.com/yts/img/avatar_720-vflYJnzBZ.png" :: class "horizontal-margin" :: defaultChannelImgAttrs -- FIXME: need a better way to get default channel
               Just channel ->
-                src channel.thumbnailUrl :: onClick (SelectChannel (Just channel.id)) :: class "horizontal-margin clickable" :: defaultChannelImgAttrs
+                src channel.thumbnailUrl :: onClick (SelectChannel (Just channel.id)) :: class "horizontal-margin clickable" :: alt channel.title :: defaultChannelImgAttrs
           in
             li
               [ class "horizontal-layout vertical-margin" ]
@@ -305,3 +314,8 @@ viewVideosList selectedChannelId channels =
               ]
         )
         videos
+
+findById id list =
+  list
+    |> List.filter (\item -> item.id == id)
+    |> List.head
