@@ -3,6 +3,7 @@ port module YoutubeShows exposing (..)
 import Html exposing (..)
 import Html.App as App
 import Html.Attributes exposing (..)
+import Html.Events exposing (onClick)
 import Time exposing (Time)
 import Dict exposing (Dict)
 
@@ -27,6 +28,7 @@ type alias Model =
   , lastChannelFetch : Time
   , lastVideosFetch : Time
   , channels: Dict String Channel
+  , selectedChannelId: Maybe String
   }
 
 type alias Channel =
@@ -52,6 +54,7 @@ emptyModel =
   , lastChannelFetch = 0
   , lastVideosFetch = 0
   , channels = Dict.empty
+  , selectedChannelId = Nothing
   }
 
 init : a -> ( Model, Cmd Msg )
@@ -65,6 +68,7 @@ type Msg
   | SetAuthorization Bool
   | AddSubscribedChannels ( List Channel )
   | AddVideos ( List Video )
+  | SelectChannel ( Maybe String )
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
@@ -105,6 +109,10 @@ update msg model =
       { model
         | channels = List.foldr updateChannelsWithVideo model.channels videos
       } ! []
+
+    SelectChannel channelId ->
+      { model | selectedChannelId = channelId } ! []
+
 
 updateChannelsWithChannels : Channel -> Dict String Channel -> Dict String Channel
 updateChannelsWithChannels channel channels =
@@ -157,7 +165,7 @@ view model =
     , div
       [ class "expand-layout horizontal-layout scroll-vertically"
       ]
-      [ viewChannelList model.channels
+      [ viewChannelList model.selectedChannelId model.channels
       , viewVideosList model
       ]
     , footer [] [ text "by Douglas Meyer" ]
@@ -166,18 +174,23 @@ view model =
 viewHeader : Model -> Html Msg
 viewHeader model =
   div
-    [ class "horizontal-layout" ]
+    [ class "horizontal-layout do-not-shrink" ]
     [ header [] [ text "YoutubeShows" ]
     , div [ class "expand-layout align-text-right" ] [ text (if model.isAuthorized then "Authorized" else "Not Authorized") ]
     ]
 
-viewChannelList : Dict String Channel -> Html Msg
-viewChannelList channels =
-  ul [ class "no-list" ] <|
-    List.map
+viewChannelList : Maybe String -> Dict String Channel -> Html Msg
+viewChannelList selectedChannelId channels =
+  ul [ class "no-list horizontal-margin" ] <|
+    ( li
+      [ onClick (SelectChannel Nothing), class (if Nothing == selectedChannelId then "selected vertical-margin" else "clickable vertical-margin") ]
+      [ text "All Channels" ]
+    ) :: List.map
       (\channel ->
         li
-          []
+          [ onClick (SelectChannel (Just channel.id)), class (if Just channel.id == selectedChannelId then "selected vertical-margin" else "clickable vertical-margin")
+          , style [("font-size", "0")]
+          ]
           [ img [ src channel.thumbnailUrl, title channel.title, width 88, height 88 ] []
           ]
       )
@@ -186,19 +199,33 @@ viewChannelList channels =
 viewVideosList : Model -> Html Msg
 viewVideosList model =
   let
-    videos = model.channels
-      |> Dict.values
-      |> List.concatMap .videos
+    channels = case model.selectedChannelId `Maybe.andThen` (\channelId -> Dict.get channelId model.channels) of
+      Nothing ->
+        model.channels
+          |> Dict.values
+          |> List.concatMap .videos
+      Just channel ->
+        channel.videos
+    videos = channels
       |> List.sortBy .publishedAt
       |> List.reverse
   in
-    ul [ class "expand-layout no-list"]
+    ul [ class "expand-layout no-list horizontal-margin"]
       <| List.map
         (\video ->
-          li
-            []
-            [ h3 [] [ text video.title ]
-            , img [ src video.thumbnailUrl, width 120, height 90 ] []
-            ]
+          let
+            defaultChannelImgAttrs = [ width 88, height 88 ]
+            channelImgAttrs = case Dict.get video.channelId model.channels of
+              Nothing ->
+                src "//s.ytimg.com/yts/img/avatar_720-vflYJnzBZ.png" :: class "horizontal-margin" :: defaultChannelImgAttrs -- FIXME: need a better way to get default channel
+              Just channel ->
+                src channel.thumbnailUrl :: onClick (SelectChannel (Just channel.id)) :: class "horizontal-margin clickable" :: defaultChannelImgAttrs
+          in
+            li
+              [ class "horizontal-layout vertical-margin" ]
+              [ img channelImgAttrs []
+              , img [ src video.thumbnailUrl, width 120, height 90, class "horizontal-margin" ] []
+              , h3 [ class "horizontal-margin" ] [ text video.title ]
+              ]
         )
         videos
