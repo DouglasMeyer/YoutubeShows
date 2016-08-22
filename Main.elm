@@ -4,32 +4,64 @@ import Html exposing (..)
 import Html.App as App
 import Html.Attributes exposing (..)
 import Html.Events exposing (onClick)
+import Html.Lazy exposing (lazy2)
 import Time exposing (Time)
 import Dict exposing (Dict)
+import Task
 
-main : Program Never
+main : Program (Maybe StoredState)
 main =
   App.programWithFlags
     { init = init
     , view = view
-    , update = update
+    , update = updateWithStorage
     , subscriptions = subscriptions
     }
 
-port authorize : () -> Cmd msg
+port setStorage : StoredState -> Cmd msg
+port authorize : (Maybe Authorization) -> Cmd msg
 port requestYTSubscribedChannels : () -> Cmd msg
 port requestYTVideos : List String -> Cmd msg
+
+updateWithStorage : Msg -> Model -> (Model, Cmd Msg)
+updateWithStorage msg model =
+  let
+    (newModel, cmds) = update msg model
+  in
+    case msg of
+      SetAuthorization      _ -> doSetStorage newModel cmds
+      AddSubscribedChannels _ -> doSetStorage newModel cmds
+      AddVideos             _ -> doSetStorage newModel cmds
+      SelectChannel         _ -> doSetStorage newModel cmds
+      _ -> ( newModel, cmds )
+
+doSetStorage : Model -> Cmd Msg -> (Model, Cmd Msg)
+doSetStorage model cmds =
+  let
+    storedState = StoredState
+      model.authorization
+      (Dict.values model.channels)
+      model.selectedChannelId
+  in
+    ( model
+    , Cmd.batch [ setStorage storedState,  cmds ]
+    )
 
 
 -- MODEL
 type alias Model =
-  { isAuthorized : Bool
+  { authorization : Maybe Authorization
   , lastAuthCheck : Time
   , lastChannelFetch : Time
   , lastVideosFetch : Time
-  , timeTilNextVideosFetch : Float
+  , timeTillNextVideosFetch : Float
   , channels: Dict String Channel
   , selectedChannelId: Maybe String
+  }
+
+type alias Authorization =
+  { token : String
+  , expiresAt : Float
   }
 
 type alias Channel =
@@ -48,26 +80,46 @@ type alias Video =
   , publishedAt : String
   }
 
+type alias StoredState =
+  { authorization : Maybe Authorization
+  , channels : List Channel
+  , selectedChannelId : Maybe String
+  }
+
 emptyModel : Model
 emptyModel =
-  { isAuthorized = False
+  { authorization = Nothing
   , lastAuthCheck = 0
   , lastChannelFetch = 0
   , lastVideosFetch = 0
-  , timeTilNextVideosFetch = 0
+  , timeTillNextVideosFetch = 0
   , channels = Dict.empty
   , selectedChannelId = Nothing
   }
 
-init : a -> ( Model, Cmd Msg )
-init _ = emptyModel ! []
+init : Maybe StoredState -> ( Model, Cmd Msg )
+init startingState =
+  case startingState of
+    Nothing ->
+      emptyModel ! []
+
+    Just stored ->
+      { emptyModel
+        | authorization = Nothing
+        , selectedChannelId = stored.selectedChannelId
+        , channels = List.foldr updateChannelsWithChannels emptyModel.channels stored.channels
+      } ! [ Time.now
+        |> Task.perform (\now -> NoOp) (\now -> AuthWithToken stored.authorization now)
+      ]
+
 
 -- UPDATE
 
 type Msg
   = NoOp
   | Tick Time
-  | SetAuthorization Bool
+  | AuthWithToken (Maybe Authorization) Time
+  | SetAuthorization ( Maybe Authorization )
   | AddSubscribedChannels ( List Channel )
   | AddVideos ( List Video )
   | SelectChannel ( Maybe String )
@@ -80,19 +132,20 @@ update msg model =
 
     Tick now ->
       let
-        timeTilNextVideosFetch = (model.lastVideosFetch + Time.minute * 20) - now
+        isAuthorized = model.authorization /= Nothing
+        timeTillNextVideosFetch = (model.lastVideosFetch + Time.minute * 20) - now
       in
-        if (model.isAuthorized == False) && (now - model.lastAuthCheck) > Time.minute then
+        if not isAuthorized && (now - model.lastAuthCheck) > Time.minute then
           { model
             | lastAuthCheck = now
-            , timeTilNextVideosFetch = timeTilNextVideosFetch
-          } ! [ authorize () ]
-        else if model.isAuthorized && (now - model.lastChannelFetch) > Time.hour * 16 then
+            , timeTillNextVideosFetch = timeTillNextVideosFetch
+          } ! [ authorize model.authorization ]
+        else if isAuthorized && (now - model.lastChannelFetch) > Time.hour * 16 then
           { model
             | lastChannelFetch = now
-            , timeTilNextVideosFetch = timeTilNextVideosFetch
+            , timeTillNextVideosFetch = timeTillNextVideosFetch
           } ! [ requestYTSubscribedChannels () ]
-        else if model.isAuthorized && timeTilNextVideosFetch <= 0 then
+        else if isAuthorized && timeTillNextVideosFetch <= 0 then
           let
             channelIds = model.channels
               |> Dict.values
@@ -100,15 +153,20 @@ update msg model =
           in
             { model
               | lastVideosFetch = now
-              , timeTilNextVideosFetch = timeTilNextVideosFetch
+              , timeTillNextVideosFetch = timeTillNextVideosFetch
             } ! [ requestYTVideos channelIds ]
         else
           { model
-          | timeTilNextVideosFetch = timeTilNextVideosFetch
+          | timeTillNextVideosFetch = timeTillNextVideosFetch
           } ! []
 
-    SetAuthorization isAuthorized ->
-      { model | isAuthorized = isAuthorized } ! []
+    AuthWithToken authorization now ->
+      { model
+        | lastAuthCheck = now
+      } ! [ authorize authorization ]
+
+    SetAuthorization authorization ->
+      { model | authorization = authorization } ! []
 
     AddSubscribedChannels channels ->
       { model
@@ -127,7 +185,13 @@ update msg model =
 
 updateChannelsWithChannels : Channel -> Dict String Channel -> Dict String Channel
 updateChannelsWithChannels channel channels =
-  Dict.insert channel.id channel channels
+  case Dict.get channel.id channels of
+    Nothing ->
+      Dict.insert channel.id channel channels
+    Just existingChannel ->
+      Dict.insert channel.id ({ channel
+        | videos = existingChannel.videos
+      }) channels
 
 updateChannelsWithVideo : Video -> Dict String Channel -> Dict String Channel
 updateChannelsWithVideo video channels =
@@ -148,7 +212,7 @@ updateChannelsWithVideo video channels =
 
 -- SUBSCRIPTIONS
 
-port gotAuthorization : (() -> msg) -> Sub msg
+port gotAuthorization : (Authorization -> msg) -> Sub msg
 port failedAuthorization : (() -> msg) -> Sub msg
 
 port subscribedChannels : (List Channel -> msg) -> Sub msg
@@ -158,8 +222,8 @@ subscriptions : Model -> Sub Msg
 subscriptions model =
   Sub.batch
     [ Time.every Time.second Tick
-    , gotAuthorization (\_ -> SetAuthorization True)
-    , failedAuthorization (\_ -> SetAuthorization False)
+    , gotAuthorization (\authorization -> SetAuthorization (Just authorization))
+    , failedAuthorization (\_ -> SetAuthorization Nothing)
     , subscribedChannels AddSubscribedChannels
     , channelVideos AddVideos
     ]
@@ -176,8 +240,8 @@ view model =
     , div
       [ class "expand-layout horizontal-layout scroll-vertically"
       ]
-      [ viewChannelList model.selectedChannelId model.channels
-      , viewVideosList model
+      [ lazy2 viewChannelList model.selectedChannelId model.channels
+      , lazy2 viewVideosList model.selectedChannelId model.channels
       ]
     , footer [] [ text "by Douglas Meyer" ]
     ]
@@ -187,8 +251,8 @@ viewHeader model =
   div
     [ class "horizontal-layout do-not-shrink" ]
     [ header [] [ text "YoutubeShows" ]
-    , div [ class "expanded-layout align-text-center" ] [ text ("Next fetch " ++ toString (round (model.timeTilNextVideosFetch / 1000))) ]
-    , div [ class "expand-layout align-text-right" ] [ text (if model.isAuthorized then "Authorized" else "Not Authorized") ]
+    , div [ class "expanded-layout align-text-center" ] [ text ("Next fetch " ++ toString (round (model.timeTillNextVideosFetch / 1000))) ]
+    , div [ class "expand-layout align-text-right" ] [ text (if model.authorization /= Nothing then "Authorized" else "Not Authorized") ]
     ]
 
 viewChannelList : Maybe String -> Dict String Channel -> Html Msg
@@ -208,17 +272,17 @@ viewChannelList selectedChannelId channels =
       )
       (Dict.values channels)
 
-viewVideosList : Model -> Html Msg
-viewVideosList model =
+viewVideosList : Maybe String -> Dict String Channel -> Html Msg
+viewVideosList selectedChannelId channels =
   let
-    channels = case model.selectedChannelId `Maybe.andThen` (\channelId -> Dict.get channelId model.channels) of
+    selectedChannels = case selectedChannelId `Maybe.andThen` (\channelId -> Dict.get channelId channels) of
       Nothing ->
-        model.channels
+        channels
           |> Dict.values
           |> List.concatMap .videos
       Just channel ->
         channel.videos
-    videos = channels
+    videos = selectedChannels
       |> List.sortBy .publishedAt
       |> List.reverse
   in
@@ -227,7 +291,7 @@ viewVideosList model =
         (\video ->
           let
             defaultChannelImgAttrs = [ width 88, height 88 ]
-            channelImgAttrs = case Dict.get video.channelId model.channels of
+            channelImgAttrs = case Dict.get video.channelId channels of
               Nothing ->
                 src "//s.ytimg.com/yts/img/avatar_720-vflYJnzBZ.png" :: class "horizontal-margin" :: defaultChannelImgAttrs -- FIXME: need a better way to get default channel
               Just channel ->

@@ -12,11 +12,18 @@
 </body>
 
 <script type="text/javascript">
-var youtubeShows = Elm.YoutubeShows.fullscreen();
+var storedState = localStorage.getItem('youtubeShows_storedState');
+var startingState = storedState ? JSON.parse(storedState) : null;
+var youtubeShows = Elm.YoutubeShows.fullscreen(startingState);
+
+youtubeShows.ports.setStorage.subscribe(function(storedState){
+  localStorage.setItem('youtubeShows_storedState', JSON.stringify(storedState));
+});
 
 function fetchYT(collection, options, cb){
   var maxResults = options.maxResults;
   if (!maxResults || maxResults > 50) options.maxResults = 50;
+
   gapi.client.youtube[collection].list(options).then(function(response){
     cb(response.result.items);
     var nextPageToken = response.result.nextPageToken;
@@ -26,6 +33,10 @@ function fetchYT(collection, options, cb){
       fetchYT(collection, options, cb);
     } else {
       cb();
+    }
+  }, function(e){
+    if (e.result.error.errors[0].reason === 'dailyLimitExceededUnreg') {
+      youtubeShows.ports.failedAuthorization.send(null);
     }
   });
 }
@@ -109,26 +120,29 @@ youtubeShows.ports.requestYTVideos.subscribe(function(playlistIds){
   }
 });
 
-youtubeShows.ports.authorize.subscribe(function(){
-  console.log('authorize', arguments);
+youtubeShows.ports.authorize.subscribe(function(authorization){
+  if (authorization) {
+    gapiPromise.then(function(){
+      gapi.auth.setToken(authorization.token);
+    });
+  }
   promiseAuthorization()
-  .then(
-    ()=> youtubeShows.ports.gotAuthorization.send(null),
-    ()=> youtubeShows.ports.failedAuthorization.send(null)
-  )
+  .then(function(authorization){
+    youtubeShows.ports.gotAuthorization.send(authorization);
+  }, function(){
+    youtubeShows.ports.failedAuthorization.send(null);
+  })
 });
 
-function promiseGapi(){
-  return new Promise(function(resolve){
-    var script = document.createElement('script');
-    var callbackName = '_Pgapi_clientLoadedCallback';
-    script.src = 'https://apis.google.com/js/client.js?onload='+callbackName;
-    window[callbackName] = resolve;
-    document.body.appendChild(script);
-  });
-}
+var gapiPromise = new Promise(function(resolve){
+  var script = document.createElement('script');
+  var callbackName = '_YTShows_clientLoadedCallback';
+  script.src = 'https://apis.google.com/js/client.js?onload='+callbackName;
+  window[callbackName] = resolve;
+  document.body.appendChild(script);
+});
 function promiseYoutube(){
-  return promiseGapi().then(function(){
+  return gapiPromise.then(function(){
     return new Promise(function(resolve){
       gapi.client.load('youtube', 'v3', resolve);
     });
@@ -143,9 +157,8 @@ function promiseAuthorization(){
         immediate
       }, function(authResult){
         if (authResult && !authResult.error){
-          resolve(authResult.expires_at);
+          resolve({ token: authResult.access_token, expiresAt: parseInt(authResult.expires_at) });
         } else {
-          console.log('authResult', window.authResult = authResult);
           reject();
         }
       });
