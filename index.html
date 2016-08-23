@@ -35,7 +35,9 @@ function fetchYT(collection, options, cb){
       cb();
     }
   }, function(e){
-    if (e.result.error.errors[0].reason === 'dailyLimitExceededUnreg') {
+    if (e.result.error.code === 401) {
+      youtubeShows.ports.failedAuthorization.send(null);
+    } else if (e.result.error.errors[0].reason === 'dailyLimitExceededUnreg') {
       youtubeShows.ports.failedAuthorization.send(null);
     }
   });
@@ -62,7 +64,8 @@ youtubeShows.ports.requestYTSubscribedChannels.subscribe(function(){
                 title: subscription.snippet.title,
                 thumbnailUrl: subscription.snippet.thumbnails.default.url,
                 uploadPlaylist: item.contentDetails.relatedPlaylists.uploads,
-                videos: []
+                videos: [],
+                shows: []
               }
             })
           );

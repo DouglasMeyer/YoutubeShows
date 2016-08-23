@@ -3,11 +3,12 @@ port module YoutubeShows exposing (..)
 import Html exposing (..)
 import Html.App as App
 import Html.Attributes exposing (..)
-import Html.Events exposing (onClick)
-import Html.Lazy exposing (lazy2)
+import Html.Events exposing (onClick, onInput)
+import Html.Lazy exposing (lazy2, lazy3)
 import Time exposing (Time)
 import Dict exposing (Dict)
 import Task
+import Regex
 
 main : Program (Maybe StoredState)
 main =
@@ -42,6 +43,7 @@ doSetStorage model cmds =
       model.authorization
       (Dict.values model.channels)
       model.selectedChannelId
+      model.selectedShow
   in
     ( model
     , Cmd.batch [ setStorage storedState,  cmds ]
@@ -55,8 +57,9 @@ type alias Model =
   , lastChannelFetch : Time
   , lastVideosFetch : Time
   , timeTillNextVideosFetch : Float
-  , channels: Dict String Channel
-  , selectedChannelId: Maybe String
+  , channels : Dict String Channel
+  , selectedChannelId : Maybe String
+  , selectedShow : Maybe String
   }
 
 type alias Authorization =
@@ -70,6 +73,7 @@ type alias Channel =
   , thumbnailUrl : String
   , uploadPlaylist : String
   , videos : List Video
+  , shows : List String
   }
 
 type alias Video =
@@ -84,6 +88,7 @@ type alias StoredState =
   { authorization : Maybe Authorization
   , channels : List Channel
   , selectedChannelId : Maybe String
+  , selectedShow : Maybe String
   }
 
 emptyModel : Model
@@ -95,6 +100,7 @@ emptyModel =
   , timeTillNextVideosFetch = 0
   , channels = Dict.empty
   , selectedChannelId = Nothing
+  , selectedShow = Nothing
   }
 
 init : Maybe StoredState -> ( Model, Cmd Msg )
@@ -108,6 +114,7 @@ init startingState =
         | authorization = Nothing
         , selectedChannelId = stored.selectedChannelId
         , channels = addChannelsToChannels stored.channels emptyModel.channels
+        , selectedShow = stored.selectedShow
       } ! [ Time.now
         |> Task.perform (\now -> NoOp) (\now -> AuthWithToken stored.authorization now)
       ]
@@ -123,6 +130,7 @@ type Msg
   | AddSubscribedChannels ( List Channel )
   | AddVideos ( List Video )
   | SelectChannel ( Maybe String )
+  | SelectShow ( Maybe String )
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
@@ -180,7 +188,13 @@ update msg model =
       } ! []
 
     SelectChannel channelId ->
-      { model | selectedChannelId = channelId } ! []
+      { model
+        | selectedChannelId = channelId
+        , selectedShow = Nothing
+      } ! []
+
+    SelectShow showName ->
+      { model | selectedShow = showName } ! []
 
 
 addChannelsToChannels : List Channel -> Dict String Channel -> Dict String Channel
@@ -243,17 +257,22 @@ subscriptions model =
 
 view : Model -> Html Msg
 view model =
-  div
-    [ class "vertical-layout" ]
-    [ viewHeader model
-    , div
-      [ class "expand-layout horizontal-layout scroll-vertically"
+  let
+    channel : Maybe Channel
+    channel = model.selectedChannelId `Maybe.andThen` (\channelId -> Dict.get channelId model.channels)
+  in
+    div
+      [ class "vertical-layout" ]
+      [ viewHeader model
+      , div
+        [ class "expand-layout horizontal-layout scroll-vertically"
+        ]
+        [ lazy2 viewChannelList model.selectedChannelId model.channels
+        , lazy2 viewShowsList model.selectedShow channel
+        , lazy3 viewVideosList model.selectedChannelId model.channels model.selectedShow
+        ]
+      , footer [] [ text "by Douglas Meyer" ]
       ]
-      [ lazy2 viewChannelList model.selectedChannelId model.channels
-      , lazy2 viewVideosList model.selectedChannelId model.channels
-      ]
-    , footer [] [ text "by Douglas Meyer" ]
-    ]
 
 viewHeader : Model -> Html Msg
 viewHeader model =
@@ -281,8 +300,20 @@ viewChannelList selectedChannelId channels =
       )
       (Dict.values channels)
 
-viewVideosList : Maybe String -> Dict String Channel -> Html Msg
-viewVideosList selectedChannelId channels =
+viewShowsList : Maybe String -> Maybe Channel -> Html Msg
+viewShowsList selectedShow channel =
+  ul
+    [ class "no-list horizontal-margin" ]
+    [ li
+        [ class "horizontal-layout" ]
+        [ input
+          [ type' "search", placeholder "new show name", onInput (\showName -> SelectShow <| Just showName ), value (Maybe.withDefault "" selectedShow) ]
+          []
+        ]
+    ]
+
+viewVideosList : Maybe String -> Dict String Channel -> Maybe String -> Html Msg
+viewVideosList selectedChannelId channels selectedShow =
   let
     selectedChannels = case selectedChannelId `Maybe.andThen` (\channelId -> Dict.get channelId channels) of
       Nothing ->
@@ -294,6 +325,9 @@ viewVideosList selectedChannelId channels =
     videos = selectedChannels
       |> List.sortBy .publishedAt
       |> List.reverse
+    filteredVideos = case selectedShow of
+      Nothing -> videos
+      Just showName -> List.filter (\v -> Regex.contains (Regex.regex showName) v.title) videos
   in
     ul [ class "expand-layout no-list horizontal-margin"]
       <| List.map
@@ -313,8 +347,9 @@ viewVideosList selectedChannelId channels =
               , h3 [ class "horizontal-margin" ] [ text video.title ]
               ]
         )
-        videos
+        filteredVideos
 
+findById : String -> List Video -> Maybe Video
 findById id list =
   list
     |> List.filter (\item -> item.id == id)
