@@ -4,7 +4,7 @@ import Html exposing (..)
 import Html.App as App
 import Html.Attributes exposing (..)
 import Html.Events exposing (onClick, onInput)
-import Html.Lazy exposing (lazy2, lazy3)
+import Html.Lazy exposing (lazy2)
 import Time exposing (Time)
 import Dict exposing (Dict)
 import Task
@@ -33,7 +33,6 @@ updateWithStorage msg model =
       SetAuthorization      _ -> doSetStorage newModel cmds
       AddSubscribedChannels _ -> doSetStorage newModel cmds
       AddVideos             _ -> doSetStorage newModel cmds
-      SelectChannel         _ -> doSetStorage newModel cmds
       _ -> ( newModel, cmds )
 
 doSetStorage : Model -> Cmd Msg -> (Model, Cmd Msg)
@@ -42,8 +41,6 @@ doSetStorage model cmds =
     storedState = StoredState
       model.authorization
       (Dict.values model.channels)
-      model.selectedChannelId
-      model.selectedShow
   in
     ( model
     , Cmd.batch [ setStorage storedState,  cmds ]
@@ -58,8 +55,8 @@ type alias Model =
   , lastVideosFetch : Time
   , timeTillNextVideosFetch : Float
   , channels : Dict String Channel
-  , selectedChannelId : Maybe String
-  , selectedShow : Maybe String
+  , channelFilter : String
+  , videoFilter : String
   }
 
 type alias Authorization =
@@ -87,8 +84,6 @@ type alias Video =
 type alias StoredState =
   { authorization : Maybe Authorization
   , channels : List Channel
-  , selectedChannelId : Maybe String
-  , selectedShow : Maybe String
   }
 
 emptyModel : Model
@@ -99,8 +94,8 @@ emptyModel =
   , lastVideosFetch = 0
   , timeTillNextVideosFetch = 0
   , channels = Dict.empty
-  , selectedChannelId = Nothing
-  , selectedShow = Nothing
+  , channelFilter = ""
+  , videoFilter = ""
   }
 
 init : Maybe StoredState -> ( Model, Cmd Msg )
@@ -112,9 +107,7 @@ init startingState =
     Just stored ->
       { emptyModel
         | authorization = Nothing
-        , selectedChannelId = stored.selectedChannelId
         , channels = addChannelsToChannels stored.channels emptyModel.channels
-        , selectedShow = stored.selectedShow
       } ! [ Time.now
         |> Task.perform (\now -> NoOp) (\now -> AuthWithToken stored.authorization now)
       ]
@@ -129,8 +122,8 @@ type Msg
   | SetAuthorization ( Maybe Authorization )
   | AddSubscribedChannels ( List Channel )
   | AddVideos ( List Video )
-  | SelectChannel ( Maybe String )
-  | SelectShow ( Maybe String )
+  | FilterChannels String
+  | FilterVideos String
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
@@ -187,14 +180,11 @@ update msg model =
         | channels = addVideosToChannels videos model.channels
       } ! []
 
-    SelectChannel channelId ->
-      { model
-        | selectedChannelId = channelId
-        , selectedShow = Nothing
-      } ! []
+    FilterChannels channelFilter ->
+      { model | channelFilter = channelFilter } ! []
 
-    SelectShow showName ->
-      { model | selectedShow = showName } ! []
+    FilterVideos videoFilter ->
+      { model | videoFilter = videoFilter } ! []
 
 
 addChannelsToChannels : List Channel -> Dict String Channel -> Dict String Channel
@@ -258,8 +248,11 @@ subscriptions model =
 view : Model -> Html Msg
 view model =
   let
-    channel : Maybe Channel
-    channel = model.selectedChannelId `Maybe.andThen` (\channelId -> Dict.get channelId model.channels)
+    filterRegex = model.channelFilter |> Regex.regex |> Regex.caseInsensitive
+    filteredChannels =
+      model.channels
+        |> Dict.values
+        |> List.filter (\channel -> Regex.contains filterRegex channel.title)
   in
     div
       [ class "vertical-layout" ]
@@ -267,9 +260,8 @@ view model =
       , div
         [ class "expand-layout horizontal-layout scroll-vertically"
         ]
-        [ lazy2 viewChannelList model.selectedChannelId model.channels
-        , lazy2 viewShowsList model.selectedShow channel
-        , lazy3 viewVideosList model.selectedChannelId model.channels model.selectedShow
+        [ lazy2 viewChannelList model.channelFilter filteredChannels
+        , lazy2 viewVideosList filteredChannels model.videoFilter
         ]
       , footer [] [ text "by Douglas Meyer" ]
       ]
@@ -283,62 +275,61 @@ viewHeader model =
     , div [ class "expand-layout align-text-right" ] [ text (if model.authorization /= Nothing then "Authorized" else "Not Authorized") ]
     ]
 
-viewChannelList : Maybe String -> Dict String Channel -> Html Msg
-viewChannelList selectedChannelId channels =
+viewChannelList : String -> List Channel -> Html Msg
+viewChannelList channelFilter channels =
   ul [ class "no-list horizontal-margin" ] <|
     ( li
-      [ onClick (SelectChannel Nothing), class (if Nothing == selectedChannelId then "selected vertical-margin" else "clickable vertical-margin") ]
-      [ text "All Channels" ]
+      [ class "vertical-margin" ]
+      [ input
+        [ type' "search"
+        , placeholder "channel filter"
+        , onInput FilterChannels
+        , value channelFilter
+        ]
+        []
+      ]
     ) :: List.map
       (\channel ->
         li
-          [ onClick (SelectChannel (Just channel.id)), class (if Just channel.id == selectedChannelId then "selected vertical-margin" else "clickable vertical-margin")
+          [ onClick (FilterChannels channel.title), class (if channel.title == channelFilter then "selected vertical-margin" else "clickable vertical-margin")
           , style [("font-size", "0")]
           ]
           [ img [ src channel.thumbnailUrl, title channel.title, alt channel.title, width 88, height 88 ] []
+          , div [ style [("font-size", "1rem")] ] [ text channel.title ]
           ]
       )
-      (Dict.values channels)
+      channels
 
-viewShowsList : Maybe String -> Maybe Channel -> Html Msg
-viewShowsList selectedShow channel =
-  ul
-    [ class "no-list horizontal-margin" ]
-    [ li
-        [ class "horizontal-layout" ]
-        [ input
-          [ type' "search", placeholder "new show name", onInput (\showName -> SelectShow <| Just showName ), value (Maybe.withDefault "" selectedShow) ]
-          []
-        ]
-    ]
-
-viewVideosList : Maybe String -> Dict String Channel -> Maybe String -> Html Msg
-viewVideosList selectedChannelId channels selectedShow =
+viewVideosList : List Channel -> String -> Html Msg
+viewVideosList channels videoFilter =
   let
-    selectedChannels = case selectedChannelId `Maybe.andThen` (\channelId -> Dict.get channelId channels) of
-      Nothing ->
-        channels
-          |> Dict.values
-          |> List.concatMap .videos
-      Just channel ->
-        channel.videos
-    videos = selectedChannels
+    filterRegex = videoFilter |> Regex.regex |> Regex.caseInsensitive
+    videos = channels
+      |> List.concatMap .videos
+      |> List.filter (\video -> Regex.contains filterRegex video.title)
       |> List.sortBy .publishedAt
       |> List.reverse
-    filteredVideos = case selectedShow of
-      Nothing -> videos
-      Just showName -> List.filter (\v -> Regex.contains (Regex.regex showName) v.title) videos
   in
-    ul [ class "expand-layout no-list horizontal-margin"]
-      <| List.map
+    ul [ class "expand-layout no-list horizontal-margin"] <|
+      ( li
+        [ class "vertical-margin" ]
+        [ input
+          [ type' "search"
+          , placeholder "video filter"
+          , onInput FilterVideos
+          , value videoFilter
+          ]
+          []
+        ]
+      ) :: List.map
         (\video ->
           let
             defaultChannelImgAttrs = [ width 88, height 88 ]
-            channelImgAttrs = case Dict.get video.channelId channels of
+            channelImgAttrs = case findById video.channelId channels of
               Nothing ->
                 src "//s.ytimg.com/yts/img/avatar_720-vflYJnzBZ.png" :: class "horizontal-margin" :: defaultChannelImgAttrs -- FIXME: need a better way to get default channel
               Just channel ->
-                src channel.thumbnailUrl :: onClick (SelectChannel (Just channel.id)) :: class "horizontal-margin clickable" :: alt channel.title :: defaultChannelImgAttrs
+                src channel.thumbnailUrl :: onClick (FilterChannels channel.title) :: class "horizontal-margin clickable" :: alt channel.title :: defaultChannelImgAttrs
           in
             li
               [ class "horizontal-layout vertical-margin" ]
@@ -347,9 +338,9 @@ viewVideosList selectedChannelId channels selectedShow =
               , h3 [ class "horizontal-margin" ] [ text video.title ]
               ]
         )
-        filteredVideos
+        videos
 
-findById : String -> List Video -> Maybe Video
+findById : String -> List { a | id : String } -> Maybe { a | id : String }
 findById id list =
   list
     |> List.filter (\item -> item.id == id)
