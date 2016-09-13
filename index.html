@@ -48,7 +48,10 @@ youtubeShows.ports.requestYTSubscribedChannels.subscribe(function(){
     'subscriptions',
     { part: 'snippet', mine: true, ordered: 'unread' },
     function(subscriptionItems){
-      if (!subscriptionItems) return;
+      if (!subscriptionItems){
+        youtubeShows.ports.channelFetchComplete.send(null);
+        return;
+      }
       var channelIds = subscriptionItems.map((function(item){ return item.snippet.resourceId.channelId; }));
 
       fetchYT(
@@ -105,7 +108,10 @@ youtubeShows.ports.requestYTVideos.subscribe(function(playlistIds){
       'videos',
       { part: 'snippet', id: videoIds.splice(0,50).join(',') },
       function(videoItems){
-        if (!videoItems) return;
+        if (!videoItems){
+          if (force) youtubeShows.ports.videoFetchComplete.send(null);
+          return;
+        }
 
         youtubeShows.ports.channelVideos.send(
           videoItems.map(function(item){
@@ -144,13 +150,11 @@ var gapiPromise = new Promise(function(resolve){
   window[callbackName] = resolve;
   document.body.appendChild(script);
 });
-function promiseYoutube(){
-  return gapiPromise.then(function(){
-    return new Promise(function(resolve){
-      gapi.client.load('youtube', 'v3', resolve);
-    });
+var youtubePromise = gapiPromise.then(function(){
+  return new Promise(function(resolve){
+    gapi.client.load('youtube', 'v3', resolve);
   });
-}
+});
 function promiseAuthorization(){
   function authorize(immediate){
     return new Promise(function(resolve, reject){
@@ -167,7 +171,7 @@ function promiseAuthorization(){
       });
     });
   }
-  return promiseYoutube().then(function(){
+  return youtubePromise.then(function(){
     return authorize(true).catch(authorize.bind(null, false));
   });
 }
