@@ -1,7 +1,3 @@
-html, body { height: 100%; }
-body { margin: 0; }
-
-input { font-size: inherit; }
 
 .vertical-layout {
   display: flex;

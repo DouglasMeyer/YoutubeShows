@@ -1,22 +1,62 @@
 port module YoutubeShows exposing (..)
 
 import Html exposing (..)
-import Html.App as App
+import RouteUrl as Routing
+import Navigation
 import Html.Attributes exposing (..)
 import Html.Events exposing (onClick, onInput)
 import Html.Lazy exposing (lazy2, lazy3)
 import Time exposing (Time)
 import Dict exposing (Dict)
+import String
 import Regex
+import Array
+import Material
+import Material.Layout as Layout
+import Material.Badge
+import Material.Options as Options
+import Material.Grid as Grid exposing (Device(..))
 
 main : Program (Maybe StoredState)
 main =
-  App.programWithFlags
+  Routing.programWithFlags
     { init = init
     , view = view
     , update = updateWithStorage
     , subscriptions = subscriptions
+    , delta2url = delta2url
+    , location2messages = location2messages
     }
+
+tabs : Array.Array String
+tabs = Array.fromList [ "main", "about", "permissions" ]
+
+tabIndex : String -> Int
+tabIndex tab =
+  tabs
+    |> Array.toIndexedList
+    |> List.filterMap (\(i,t) -> if t == tab then Just i else Nothing)
+    |> List.head
+    |> Maybe.withDefault 0
+
+delta2url : Model -> Model -> Maybe Routing.UrlChange
+delta2url model1 model2 =
+  if model1.selectedTab /= model2.selectedTab then
+    { entry = Routing.NewEntry
+    , url = model2.selectedTab
+      |> String.cons '#'
+    } |> Just
+  else
+    Nothing
+
+
+location2messages : Navigation.Location -> List Msg
+location2messages location =
+  location.hash
+    |> String.dropLeft 1
+    |> SelectTab
+    |> flip (::) []
+
 
 port setStorage : StoredState -> Cmd msg
 port authorize : (Maybe Authorization) -> Cmd msg
@@ -58,6 +98,8 @@ type alias Model =
   , channels : Dict String Channel
   , channelFilter : String
   , videoFilter : String
+  , mdl : Material.Model
+  , selectedTab : String
   }
 
 type alias Authorization =
@@ -99,6 +141,8 @@ emptyModel =
   , channels = Dict.empty
   , channelFilter = ""
   , videoFilter = ""
+  , mdl = Material.model
+  , selectedTab = "main"
   }
 
 init : Maybe StoredState -> ( Model, Cmd Msg )
@@ -117,7 +161,7 @@ init startingState =
 -- UPDATE
 
 type Msg
-  = NoOp
+  = Mdl (Material.Msg Msg)
   | Tick Time
   | AuthWithToken (Maybe Authorization) Time
   | SetAuthorization ( Maybe Authorization )
@@ -127,12 +171,13 @@ type Msg
   | AddVideos ( List Video )
   | FilterChannels String
   | FilterVideos String
+  | SelectTab String
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
   case msg of
-    NoOp ->
-      model ! []
+    Mdl msg' ->
+      Material.update msg' model
 
     Tick now ->
       let
@@ -196,6 +241,8 @@ update msg model =
 
     FilterVideos videoFilter ->
       { model | videoFilter = videoFilter } ! []
+
+    SelectTab name -> { model | selectedTab = name } ! []
 
 
 addChannelsToChannels : List Channel -> Dict String Channel -> Dict String Channel
@@ -262,6 +309,38 @@ subscriptions model =
 
 view : Model -> Html Msg
 view model =
+  Layout.render Mdl
+    model.mdl
+    [ Layout.fixedHeader
+    , Layout.selectedTab <| tabIndex model.selectedTab
+    , Layout.onSelectTab <| (\index ->
+        Array.get index tabs
+        |> Maybe.withDefault "main"
+        |> SelectTab
+      )
+    ]
+    { header =
+      [ Layout.row []
+        [ Layout.title [] [ text "YoutubeShows" ]
+        ]
+      ]
+    , drawer = []
+    , tabs =
+      ( [ text "Videos"
+        , text "About"
+        , Options.span [ Material.Badge.add "3" ] [ text "Configure" ]
+        ],
+        []
+      )
+    , main =
+      [ case model.selectedTab of
+        "about" -> viewAbout model
+        _ -> viewMain model
+      ]
+    }
+
+viewMain : Model -> Html Msg
+viewMain model =
   let
     filterRegex = model.channelFilter |> Regex.regex |> Regex.caseInsensitive
     filteredChannels =
@@ -279,6 +358,25 @@ view model =
         ( model.isFetchingChannels || model.isFetchingVideos )
         model.videoFilter
       ]
+
+viewAbout : Model -> Html Msg
+viewAbout model =
+  Grid.grid []
+    [ Grid.cell [ Grid.offset All 3, Grid.size All 6 ]
+      [ h2 [] [ text "YoutubeShows" ]
+      , p []
+        [ text """
+          Never miss a video released from your subscriptions. When a video is
+          published to a channel you follow, you will get a notification. Simple
+          as that.
+          More features to follow.
+        """
+        ]
+      , p [] [ text "Is it safe to sign-in with my google account?" ]
+      , p []
+        [ a [ href "https://support.google.com/accounts/answer/112802?hl=en" ] [ text "yes" ] ]
+      ]
+    ]
 
 viewChannelList : String -> List Channel -> Html Msg
 viewChannelList channelFilter channels =
