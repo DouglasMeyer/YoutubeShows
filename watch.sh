@@ -1,2 +1,2 @@
 ./build.sh
-fswatch -o Main.elm | xargs -n1 ./build.sh
+fswatch -o src/YoutubeShows.elm | xargs -n1 ./build.sh

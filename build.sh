@@ -1,1 +1,1 @@
-elm make Main.elm --output shows.js
+elm make src/YoutubeShows.elm --output shows.js
