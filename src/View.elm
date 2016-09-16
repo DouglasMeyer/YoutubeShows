@@ -15,6 +15,9 @@ import Material.Layout as Layout
 import Material.Badge
 import Material.Options as Options
 import Material.Grid as Grid exposing (Device(..))
+import Material.Button as Button
+import Material.Progress as Progress
+import Material.Typography as Typo
 
 root : Model -> Html Msg
 root model =
@@ -32,8 +35,13 @@ root model =
     , drawer = []
     , tabs =
       ( [ text "Videos"
-        , text "About"
-        , Options.span [ Material.Badge.add "3" ] [ text "Configure" ]
+        , Options.span
+          ( if not model.authorization.isAuthorized && not model.authorization.isAuthorizing then
+            [ Material.Badge.add "•"]
+          else
+            []
+          )
+          [ text "About" ]
         ],
         []
       )
@@ -46,22 +54,50 @@ root model =
 
 about : Model -> Html Msg
 about model =
-  Grid.grid []
-    [ Grid.cell [ Grid.offset All 3, Grid.size All 6 ]
-      [ h2 [] [ text "YoutubeShows" ]
-      , p []
-        [ text """
-          Never miss a video released from your subscriptions. When a video is
-          published to a channel you follow, you will get a notification. Simple
-          as that.
-          More features to follow.
-        """
+  let
+    signInRow =
+      if model.authorization.isAuthorized then
+        [ text "You are "
+        , em [] [ text "signed in"]
+        , text " through Google"
         ]
-      , p [] [ text "Is it safe to sign-in with my google account?" ]
-      , p []
-        [ a [ href "https://support.google.com/accounts/answer/112802?hl=en" ] [ text "yes" ] ]
+      else if model.authorization.isAuthorizing then
+        [ text "Signing in"
+        , Progress.indeterminate
+        ]
+      else
+        [ text "You are "
+        , em [] [ text "not signed in" ]
+        , text " through Google "
+        , Button.render Mdl [0] model.mdl
+          [ Button.raised
+          , Button.colored
+          , Button.onClick <| GetAuthorization False
+          ]
+          [ text "Sign in" ]
+        ]
+  in
+    Grid.grid []
+      [ Grid.cell [ Grid.offset All 3, Grid.size All 6 ]
+        [ p []
+          [ text """
+            With YoutubeShows you will never miss a video released from your subscriptions. When a video is
+            published to a channel you follow, you will get a notification. Simple
+            as that.
+            More features to follow.
+          """
+          ]
+        , Options.styled h3
+          [ Typo.title ]
+          [ text "Google sign-in" ]
+        , p [] signInRow
+        , a
+          [ href "https://support.google.com/accounts/answer/112802?hl=en"
+          , target "_blank"
+          ]
+          [ text "Learn more about using your Google Account to Sign in to other sites" ]
+        ]
       ]
-    ]
 
 mainView : Model -> Html Msg
 mainView model =

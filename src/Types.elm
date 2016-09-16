@@ -1,12 +1,14 @@
 module Types exposing (..)
 
+import Auth
+
 import Time exposing (Time)
 import Dict exposing (Dict)
 import Material
 
 type alias Model =
-  { authorization : Maybe Authorization
-  , lastAuthCheck : Time
+  { authorization : Auth.Model
+  , mdl : Material.Model
   , isFetchingChannels : Bool
   , lastChannelFetch : Time
   , isFetchingVideos : Bool
@@ -15,13 +17,7 @@ type alias Model =
   , channels : Dict String Channel
   , channelFilter : String
   , videoFilter : String
-  , mdl : Material.Model
   , selectedTab : String
-  }
-
-type alias Authorization =
-  { token : String
-  , expiresAt : Float
   }
 
 type alias Channel =
@@ -42,7 +38,7 @@ type alias Video =
   }
 
 type alias StoredState =
-  { authorization : Maybe Authorization
+  { authorization : Auth.Model
   , channels : List Channel
   }
 

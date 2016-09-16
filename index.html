@@ -17,6 +17,7 @@
 </body>
 
 <script type="text/javascript">
+/* globals localStorage Elm gapi */
 var storedState = localStorage.getItem('youtubeShows_storedState');
 var startingState = storedState ? JSON.parse(storedState) : null;
 var youtubeShows = Elm.YoutubeShows.fullscreen(startingState);
@@ -66,7 +67,7 @@ youtubeShows.ports.requestYTSubscribedChannels.subscribe(function(){
           if (!channelItems) return;
           youtubeShows.ports.subscribedChannels.send(
             channelItems.map(function(item){
-              var subscription = subscriptionItems.find(function(sub){ return sub.snippet.resourceId.channelId === item.id; })
+              var subscription = subscriptionItems.find(function(sub){ return sub.snippet.resourceId.channelId === item.id; });
               return {
                 id: item.id,
                 title: subscription.snippet.title,
@@ -74,13 +75,13 @@ youtubeShows.ports.requestYTSubscribedChannels.subscribe(function(){
                 uploadPlaylist: item.contentDetails.relatedPlaylists.uploads,
                 videos: [],
                 shows: []
-              }
+              };
             })
           );
         }
-      )
+      );
     }
-  )
+  );
 });
 
 youtubeShows.ports.requestYTVideos.subscribe(function(playlistIds){
@@ -134,18 +135,27 @@ youtubeShows.ports.requestYTVideos.subscribe(function(playlistIds){
   }
 });
 
-youtubeShows.ports.authorize.subscribe(function(authorization){
-  if (authorization) {
-    gapiPromise.then(function(){
-      gapi.auth.setToken(authorization.token);
+youtubeShows.ports.authorize.subscribe(function([{ token }, immediate]){
+  gapiPromise.then(function(){
+    if (token) gapi.auth.setToken(token);
+
+    return youtubePromise;
+  }).then(function(){
+    gapi.auth.authorize({
+      client_id: '699114606672',
+      scope: 'https://www.googleapis.com/auth/youtube',
+      immediate
+    }, function(authResult){
+      if (authResult && !authResult.error){
+        youtubeShows.ports.gotAuthorization.send(
+          { token: authResult.access_token
+          }
+        );
+      } else {
+        youtubeShows.ports.failedAuthorization.send(null);
+      }
     });
-  }
-  promiseAuthorization()
-  .then(function(authorization){
-    youtubeShows.ports.gotAuthorization.send(authorization);
-  }, function(){
-    youtubeShows.ports.failedAuthorization.send(null);
-  })
+  });
 });
 
 var gapiPromise = new Promise(function(resolve){
@@ -160,26 +170,6 @@ var youtubePromise = gapiPromise.then(function(){
     gapi.client.load('youtube', 'v3', resolve);
   });
 });
-function promiseAuthorization(){
-  function authorize(immediate){
-    return new Promise(function(resolve, reject){
-      gapi.auth.authorize({
-        client_id: '699114606672',
-        scope: 'https://www.googleapis.com/auth/youtube',
-        immediate
-      }, function(authResult){
-        if (authResult && !authResult.error){
-          resolve({ token: authResult.access_token, expiresAt: parseInt(authResult.expires_at) });
-        } else {
-          reject();
-        }
-      });
-    });
-  }
-  return youtubePromise.then(function(){
-    return authorize(true).catch(authorize.bind(null, false));
-  });
-}
 </script>
 
 </html>

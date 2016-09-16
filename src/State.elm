@@ -4,7 +4,8 @@ port module State exposing
   , Msg(..), setStorage
   )
 
-import Types exposing (Model, StoredState, Authorization, Channel, Video, findById)
+import Types exposing (Model, StoredState, Channel, Video, findById)
+import Auth exposing (authorize)
 
 import Array
 import Dict exposing (Dict)
@@ -12,32 +13,27 @@ import Time exposing (Time)
 import Material
 
 init : Maybe StoredState -> ( Model, Cmd Msg )
-init startingState =
-  case startingState of
-    Nothing ->
-      emptyModel ! []
-
-    Just stored ->
-      { emptyModel
-        | authorization = Nothing
-        , channels = addChannelsToChannels stored.channels emptyModel.channels
-      } ! []
-
-emptyModel : Model
-emptyModel =
-  { authorization = Nothing
-  , lastAuthCheck = 0
-  , isFetchingChannels = False
-  , lastChannelFetch = 0
-  , isFetchingVideos = False
-  , lastVideosFetch = 0
-  , timeTillNextVideosFetch = 0
-  , channels = Dict.empty
-  , channelFilter = ""
-  , videoFilter = ""
-  , mdl = Material.model
-  , selectedTab = "main"
-  }
+init maybeStartingState =
+  let
+    (authModel, authCmd) = Auth.init <| maybeStartingState `Maybe.andThen` (.authorization >> Just)
+    model =
+      { authorization = authModel
+      , mdl = Material.model
+      , isFetchingChannels = False
+      , lastChannelFetch = 0
+      , isFetchingVideos = False
+      , lastVideosFetch = 0
+      , timeTillNextVideosFetch = 0
+      , channels = case maybeStartingState of
+        Nothing -> Dict.empty
+        Just startingState ->
+          addChannelsToChannels startingState.channels Dict.empty
+      , channelFilter = ""
+      , videoFilter = ""
+      , selectedTab = "main"
+      }
+  in
+    model ! [ Cmd.map AuthMsg authCmd ]
 
 tabs : Array.Array String
 tabs = Array.fromList [ "main", "about", "permissions" ]
@@ -57,9 +53,9 @@ tabToIndex tab =
 
 type Msg
   = Mdl (Material.Msg Msg)
+  | AuthMsg Auth.Msg
+  | GetAuthorization Bool
   | Tick Time
-  | AuthWithToken (Maybe Authorization) Time
-  | SetAuthorization ( Maybe Authorization )
   | ChannelFetchComplete
   | AddSubscribedChannels ( List Channel )
   | VideoFetchComplete
@@ -70,12 +66,9 @@ type Msg
 
 -- Outgoing
 port setStorage : StoredState -> Cmd msg
-port authorize : (Maybe Authorization) -> Cmd msg
 port requestYTSubscribedChannels : () -> Cmd msg
 port requestYTVideos : List String -> Cmd msg
 -- Incoming
-port gotAuthorization : (Authorization -> msg) -> Sub msg
-port failedAuthorization : (() -> msg) -> Sub msg
 port subscribedChannels : (List Channel -> msg) -> Sub msg
 port channelFetchComplete : (() -> msg) -> Sub msg
 port channelVideos : (List Video -> msg) -> Sub msg
@@ -84,20 +77,23 @@ port videoFetchComplete : (() -> msg) -> Sub msg
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
   case msg of
-    Mdl msg' ->
-      Material.update msg' model
+    Mdl msg' -> Material.update msg' model
+    AuthMsg authMsg ->
+      let
+        (authModel, authCmd) = Auth.update authMsg model.authorization
+      in
+        { model | authorization = authModel
+        } ! [ Cmd.map AuthMsg authCmd ]
+
+    GetAuthorization immediate ->
+      model ! [ Cmd.map AuthMsg <| authorize (model.authorization, immediate) ]
 
     Tick now ->
       let
-        isAuthorized = model.authorization /= Nothing
+        isAuthorized = model.authorization.isAuthorized
         timeTillNextVideosFetch = (model.lastVideosFetch + Time.minute * 20) - now
       in
-        if not isAuthorized && (now - model.lastAuthCheck) > Time.minute then
-          { model
-            | lastAuthCheck = now
-            , timeTillNextVideosFetch = timeTillNextVideosFetch
-          } ! [ authorize model.authorization ]
-        else if isAuthorized && (now - model.lastChannelFetch) > Time.hour * 16 then
+        if isAuthorized && (now - model.lastChannelFetch) > Time.hour * 16 then
           { model
             | lastChannelFetch = now
             , isFetchingChannels = True
@@ -118,14 +114,6 @@ update msg model =
           { model
           | timeTillNextVideosFetch = timeTillNextVideosFetch
           } ! []
-
-    AuthWithToken authorization now ->
-      { model
-        | lastAuthCheck = now
-      } ! [ authorize authorization ]
-
-    SetAuthorization authorization ->
-      { model | authorization = authorization } ! []
 
     ChannelFetchComplete ->
       { model | isFetchingChannels = False } ! []
@@ -191,9 +179,8 @@ addVideosToChannels videos channels =
 subscriptions : Model -> Sub Msg
 subscriptions model =
   Sub.batch
-    [ Time.every Time.second Tick
-    , gotAuthorization (\authorization -> SetAuthorization (Just authorization))
-    , failedAuthorization (\_ -> SetAuthorization Nothing)
+    [ Sub.map AuthMsg <| Auth.subscriptions model.authorization
+    , Time.every Time.second Tick
     , subscribedChannels AddSubscribedChannels
     , channelFetchComplete (\_ -> ChannelFetchComplete)
     , channelVideos AddVideos

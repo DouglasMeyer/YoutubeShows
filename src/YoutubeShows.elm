@@ -1,6 +1,6 @@
 port module YoutubeShows exposing (..)
 
-import State exposing (setStorage, Msg(SelectTab, SetAuthorization, AddSubscribedChannels, AddVideos))
+import State exposing (setStorage, Msg(SelectTab))
 import View
 import Types exposing (Model, StoredState)
 
@@ -32,21 +32,18 @@ delta2url model1 model2 =
 
 location2messages : Navigation.Location -> List Msg
 location2messages location =
-  location.hash
-    |> String.dropLeft 1
-    |> SelectTab
-    |> flip (::) []
+  let
+    possibleTab = location.hash |> String.dropLeft 1
+    tab = if String.isEmpty possibleTab then "about" else possibleTab
+  in
+    [ SelectTab tab ]
 
 updateWithStorage : Msg -> Model -> (Model, Cmd Msg)
 updateWithStorage msg model =
   let
     (newModel, cmds) = State.update msg model
   in
-    case msg of
-      SetAuthorization      _ -> doSetStorage newModel cmds
-      AddSubscribedChannels _ -> doSetStorage newModel cmds
-      AddVideos             _ -> doSetStorage newModel cmds
-      _ -> ( newModel, cmds )
+    doSetStorage newModel cmds
 
 doSetStorage : Model -> Cmd Msg -> (Model, Cmd Msg)
 doSetStorage model cmds =
