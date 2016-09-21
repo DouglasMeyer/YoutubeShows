@@ -1,0 +1,207 @@
+<!DOCTYPE HTML>
+<html>
+
+<head>
+  <meta charset="UTF-8">
+  <title>YoutubeShows</title>
+  <script type="text/javascript" src="shows.js"></script>
+  <!-- MDL -->
+  <link href='https://fonts.googleapis.com/css?family=Roboto:400,300,500|Roboto+Mono|Roboto+Condensed:400,700&subset=latin,latin-ext' rel='stylesheet' type='text/css'>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons">
+  <link rel="stylesheet" href="https://code.getmdl.io/1.2.0/material.red-blue.min.css" />
+
+  <link rel="stylesheet" href="shows.css">
+</head>
+
+<body>
+  <aside class="sidebar">
+    <script async src="//pagead2.googlesyndication.com/pagead/js/adsbygoogle.js"></script>
+    <!-- Sidebar -->
+    <ins class="adsbygoogle"
+         style="display:block"
+         data-ad-client="ca-pub-4268713082415018"
+         data-ad-slot="5834816280"
+         data-ad-format="auto"></ins>
+    <script>
+    (adsbygoogle = window.adsbygoogle || []).push({});
+    </script>
+  </aside>
+</body>
+
+<script type="text/javascript">
+/* globals localStorage Elm gapi Notification */
+var storedState = localStorage.getItem('youtubeShows_storedState');
+var startingState = storedState ? JSON.parse(storedState) : null;
+var youtubeShows = Elm.YoutubeShows.fullscreen(startingState);
+
+youtubeShows.ports.setStorage.subscribe(function(storedState){
+  localStorage.setItem('youtubeShows_storedState', JSON.stringify(storedState));
+});
+
+function fetchYT(collection, options, cb){
+  var maxResults = options.maxResults;
+  if (!maxResults || maxResults > 50) options.maxResults = 50;
+
+  gapi.client.youtube[collection].list(options).then(function(response){
+    cb(response.result.items);
+    var nextPageToken = response.result.nextPageToken;
+    if (nextPageToken && (maxResults === undefined || maxResults > 50)) {
+      options.pageToken = nextPageToken;
+      options.maxResults = maxResults ? maxResults - 50 : undefined;
+      fetchYT(collection, options, cb);
+    } else {
+      cb();
+    }
+  }, function(e){
+    if (e.result.error.code === 401) {
+      youtubeShows.ports.failedAuthorization.send(null);
+    } else if (e.result.error.errors[0].reason === 'dailyLimitExceededUnreg') {
+      youtubeShows.ports.failedAuthorization.send(null);
+    }
+  });
+}
+
+youtubeShows.ports.requestYTSubscribedChannels.subscribe(function(){
+  fetchYT(
+    'subscriptions',
+    { part: 'snippet', mine: true, ordered: 'unread' },
+    function(subscriptionItems){
+      if (!subscriptionItems){
+        youtubeShows.ports.channelFetchComplete.send(null);
+        return;
+      }
+      var channelIds = subscriptionItems.map((function(item){ return item.snippet.resourceId.channelId; }));
+
+      fetchYT(
+        'channels',
+        { part: 'contentDetails', id: channelIds.join(',') },
+        function(channelItems){
+          if (!channelItems) return;
+          youtubeShows.ports.subscribedChannels.send(
+            channelItems.map(function(item){
+              var subscription = subscriptionItems.find(function(sub){ return sub.snippet.resourceId.channelId === item.id; });
+              return {
+                id: item.id,
+                title: subscription.snippet.title,
+                thumbnailUrl: subscription.snippet.thumbnails.default.url,
+                uploadPlaylist: item.contentDetails.relatedPlaylists.uploads,
+                videos: [],
+                shows: []
+              };
+            })
+          );
+        }
+      );
+    }
+  );
+});
+
+youtubeShows.ports.requestYTVideos.subscribe(function(playlistIds){
+  var videoIds = [];
+
+  Promise.all(playlistIds.map(function(playlistId){
+    return new Promise(function(resolve){
+      fetchYT(
+        'playlistItems',
+        { part: 'contentDetails', playlistId: playlistId, maxResults: 10 },
+        function(playlistItems){
+          if (!playlistItems) return;
+
+          videoIds = videoIds.concat(
+            playlistItems.map(function(item){
+              return item.contentDetails.videoId;
+            })
+          );
+          checkFetchVideos();
+          resolve();
+        }
+      );
+    });
+  })).then(function(){ checkFetchVideos(true); });
+
+  function checkFetchVideos(force){
+    if (!force && videoIds.length < 50) return;
+
+    fetchYT(
+      'videos',
+      { part: 'snippet', id: videoIds.splice(0,50).join(',') },
+      function(videoItems){
+        if (!videoItems){
+          if (force) youtubeShows.ports.videoFetchComplete.send(null);
+          return;
+        }
+
+        youtubeShows.ports.channelVideos.send(
+          videoItems.map(function(item){
+            return {
+              id: item.id,
+              channelId: item.snippet.channelId,
+              title: item.snippet.title,
+              thumbnailUrl: item.snippet.thumbnails.default.url,
+              publishedAt: item.snippet.publishedAt
+            };
+          })
+        );
+      }
+    );
+  }
+});
+
+youtubeShows.ports.authorize.subscribe(function([{ token }, immediate]){
+  gapiPromise.then(function(){
+    if (token) gapi.auth.setToken(token);
+
+    return youtubePromise;
+  }).then(function(){
+    gapi.auth.authorize({
+      client_id: '699114606672',
+      scope: 'https://www.googleapis.com/auth/youtube',
+      immediate
+    }, function(authResult){
+      if (authResult && !authResult.error){
+        var expiresAt = authResult.expires_at * 1000;
+        youtubeShows.ports.gotAuthorization.send(
+          { token: authResult.access_token
+          , expiresAt: expiresAt
+          }
+        );
+      } else {
+        youtubeShows.ports.failedAuthorization.send(null);
+      }
+    });
+  });
+});
+
+var gapiPromise = new Promise(function(resolve){
+  var script = document.createElement('script');
+  var callbackName = '_YTShows_clientLoadedCallback';
+  script.src = 'https://apis.google.com/js/client.js?onload='+callbackName;
+  window[callbackName] = resolve;
+  document.body.appendChild(script);
+});
+var youtubePromise = gapiPromise.then(function(){
+  return new Promise(function(resolve){
+    gapi.client.load('youtube', 'v3', resolve);
+  });
+});
+
+
+// Notification
+youtubeShows.ports.checkPermission.subscribe(function(){
+  youtubeShows.ports.updatePermission.send(Notification.permission);
+});
+
+youtubeShows.ports.requestPermission.subscribe(function(){
+  Notification.requestPermission(function(permission){
+    youtubeShows.ports.updatePermission.send(permission);
+  });
+});
+
+youtubeShows.ports.notify.subscribe(function([ title, body, tag ]){
+  new Notification(title, { body: body, tag: tag });
+});
+
+
+</script>
+
+</html>
