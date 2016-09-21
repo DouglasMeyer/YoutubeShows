@@ -12,6 +12,7 @@ import Array
 import Dict exposing (Dict)
 import Time exposing (Time)
 import Material
+import Material.Layout
 
 init : Maybe StoredState -> ( Model, Cmd Msg )
 init maybeStartingState =
@@ -21,7 +22,7 @@ init maybeStartingState =
     model =
       { authorization = authModel
       , notification = notificationModel
-      , mdl = Material.model
+      , mdl = Material.Layout.setTabsWidth 100 Material.model
       , isFetchingChannels = False
       , lastChannelFetch = 0
       , isFetchingVideos = False
@@ -38,7 +39,8 @@ init maybeStartingState =
       }
   in
     model !
-    [ Cmd.map AuthMsg authCmd
+    [ Material.init Mdl
+    , Cmd.map AuthMsg authCmd
     , Cmd.map NotificationMsg notificationCmd
     ]
 
