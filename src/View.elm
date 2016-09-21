@@ -2,6 +2,7 @@ module View exposing (root)
 
 import Types exposing (Model, Channel, Video, findById)
 import State exposing (indexToTab, tabToIndex, Msg(..))
+import Notification
 
 import Regex
 import Dict
@@ -19,40 +20,51 @@ import Material.Button as Button
 import Material.Progress as Progress
 import Material.Typography as Typo
 
-root : Model -> Html Msg
+root : Model -> Html State.Msg
 root model =
-  Layout.render Mdl
-    model.mdl
-    [ Layout.fixedHeader
-    , Layout.selectedTab <| tabToIndex model.selectedTab
-    , Layout.onSelectTab <| indexToTab >> SelectTab
-    ]
-    { header =
-      [ Layout.row []
-        [ Layout.title [] [ text "YoutubeShows" ]
+  let
+    needsAuthorization = not model.authorization.isAuthorized && not model.authorization.isAuthorizing
+    needsNotificationPermission = Notification.needsNotificationPermission model.notification
+  in
+    Layout.render Mdl
+      model.mdl
+      [ Layout.fixedHeader
+      , Layout.selectedTab <| tabToIndex model.selectedTab
+      , Layout.onSelectTab <| indexToTab >> SelectTab
+      ]
+      { header =
+        [ Layout.row []
+          [ Layout.title [] [ text "YoutubeShows" ]
+          ]
         ]
-      ]
-    , drawer = []
-    , tabs =
-      ( [ text "Videos"
-        , Options.span
-          ( if not model.authorization.isAuthorized && not model.authorization.isAuthorizing then
-            [ Material.Badge.add "•"]
-          else
-            []
-          )
-          [ text "About" ]
-        ],
-        []
-      )
-    , main =
-      [ case model.selectedTab of
-        "about" -> about model
-        _ -> mainView model
-      ]
-    }
+      , drawer = []
+      , tabs =
+        ( [ Options.span
+            ( if List.isEmpty model.newVideos then
+              []
+            else
+              [ Material.Badge.add <| toString <| List.length model.newVideos
+              ]
+            )
+            [ text "Videos" ]
+          , Options.span
+            ( if needsAuthorization || needsNotificationPermission then
+              [ Material.Badge.add "•"]
+            else
+              []
+            )
+            [ text "About" ]
+          ],
+          []
+        )
+      , main =
+        [ case model.selectedTab of
+          "about" -> about model
+          _ -> mainView model
+        ]
+      }
 
-about : Model -> Html Msg
+about : Model -> Html State.Msg
 about model =
   let
     signInRow =
@@ -76,6 +88,18 @@ about model =
           ]
           [ text "Sign in" ]
         ]
+    notificationRow =
+      if Notification.needsNotificationPermission model.notification then
+        [ text "In order to receive notifications, you will need to "
+        , Button.render Mdl [1] model.mdl
+          [ Button.raised
+          , Button.colored
+          , Button.onClick <| GetNotificationPermission
+          ]
+          [ text "grant permission" ]
+        ]
+      else
+        [ text "You will receive notifications " ]
   in
     Grid.grid []
       [ Grid.cell [ Grid.offset All 3, Grid.size All 6 ]
@@ -96,10 +120,14 @@ about model =
           , target "_blank"
           ]
           [ text "Learn more about using your Google Account to Sign in to other sites" ]
+        , Options.styled h3
+          [ Typo.title ]
+          [ text "Notifications" ]
+        , p [] notificationRow
         ]
       ]
 
-mainView : Model -> Html Msg
+mainView : Model -> Html State.Msg
 mainView model =
   let
     filterRegex = model.channelFilter |> Regex.regex |> Regex.caseInsensitive
@@ -114,12 +142,12 @@ mainView model =
       [ lazy2 channelList model.channelFilter filteredChannels
       , lazy3
         videosList
+        model
         filteredChannels
-        ( model.isFetchingChannels || model.isFetchingVideos )
         model.videoFilter
       ]
 
-channelList : String -> List Channel -> Html Msg
+channelList : String -> List Channel -> Html State.Msg
 channelList channelFilter channels =
   ul [ class "no-list horizontal-margin" ] <|
     ( li
@@ -155,8 +183,8 @@ channelList channelFilter channels =
       )
       channels
 
-videosList : List Channel -> Bool -> String -> Html Msg
-videosList channels isFetching videoFilter =
+videosList : Model -> List Channel -> String -> Html State.Msg
+videosList model channels videoFilter =
   let
     filterRegex = videoFilter |> Regex.regex |> Regex.caseInsensitive
     videos = channels
@@ -164,6 +192,7 @@ videosList channels isFetching videoFilter =
       |> List.filter (\video -> Regex.contains filterRegex video.title)
       |> List.sortBy .publishedAt
       |> List.reverse
+      |> List.take 300
   in
     ul [ class "expand-layout no-list horizontal-margin"] <|
       ( li
@@ -176,12 +205,22 @@ videosList channels isFetching videoFilter =
           ]
           []
         ]
-      ) :: ( li
-        [ style (if isFetching then [] else [("display","none")]) ]
-        [ text "Checking for new videos" ]
-      ) :: List.map (\v -> videoView v channels) videos
+      )
+      :: videosStatus model
+      :: List.map (\v -> videoView v channels) videos
 
-videoView : Video -> List Channel -> Html Msg
+videosStatus : Model -> Html State.Msg
+videosStatus model =
+  let
+    isFetching = model.isFetchingChannels || model.isFetchingVideos
+  in
+    if isFetching then
+      li [ class "VideosStatus" ]
+        [ text "Checking for new videos" ]
+    else
+      li [] []
+
+videoView : Video -> List Channel -> Html State.Msg
 videoView video channels =
   let
     channel = case findById video.channelId channels of

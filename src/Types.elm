@@ -1,6 +1,7 @@
 module Types exposing (..)
 
 import Auth
+import Notification
 
 import Time exposing (Time)
 import Dict exposing (Dict)
@@ -8,6 +9,7 @@ import Material
 
 type alias Model =
   { authorization : Auth.Model
+  , notification : Notification.Model
   , mdl : Material.Model
   , isFetchingChannels : Bool
   , lastChannelFetch : Time
@@ -18,6 +20,7 @@ type alias Model =
   , channelFilter : String
   , videoFilter : String
   , selectedTab : String
+  , newVideos : List Video
   }
 
 type alias Channel =

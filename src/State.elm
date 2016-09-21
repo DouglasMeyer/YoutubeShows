@@ -6,6 +6,7 @@ port module State exposing
 
 import Types exposing (Model, StoredState, Channel, Video, findById)
 import Auth exposing (authorize)
+import Notification exposing (notify, requestPermission)
 
 import Array
 import Dict exposing (Dict)
@@ -16,8 +17,10 @@ init : Maybe StoredState -> ( Model, Cmd Msg )
 init maybeStartingState =
   let
     (authModel, authCmd) = Auth.init <| maybeStartingState `Maybe.andThen` (.authorization >> Just)
+    (notificationModel, notificationCmd) = Notification.init
     model =
       { authorization = authModel
+      , notification = notificationModel
       , mdl = Material.model
       , isFetchingChannels = False
       , lastChannelFetch = 0
@@ -31,9 +34,13 @@ init maybeStartingState =
       , channelFilter = ""
       , videoFilter = ""
       , selectedTab = "main"
+      , newVideos = []
       }
   in
-    model ! [ Cmd.map AuthMsg authCmd ]
+    model !
+    [ Cmd.map AuthMsg authCmd
+    , Cmd.map NotificationMsg notificationCmd
+    ]
 
 tabs : Array.Array String
 tabs = Array.fromList [ "main", "about", "permissions" ]
@@ -54,7 +61,9 @@ tabToIndex tab =
 type Msg
   = Mdl (Material.Msg Msg)
   | AuthMsg Auth.Msg
+  | NotificationMsg Notification.Msg
   | GetAuthorization Bool
+  | GetNotificationPermission
   | Tick Time
   | ChannelFetchComplete
   | AddSubscribedChannels ( List Channel )
@@ -84,9 +93,18 @@ update msg model =
       in
         { model | authorization = authModel
         } ! [ Cmd.map AuthMsg authCmd ]
+    NotificationMsg notificationMsg ->
+      let
+        (notificationModel, notificationCmd) = Notification.update notificationMsg model.notification
+      in
+        { model | notification = notificationModel
+        } ! [ Cmd.map NotificationMsg notificationCmd ]
 
     GetAuthorization immediate ->
       model ! [ Cmd.map AuthMsg <| authorize (model.authorization, immediate) ]
+
+    GetNotificationPermission ->
+      model ! [ Cmd.map NotificationMsg <| requestPermission () ]
 
     Tick now ->
       let
@@ -125,12 +143,38 @@ update msg model =
       } ! []
 
     VideoFetchComplete ->
-      { model | isFetchingVideos = False } ! []
+      { model | isFetchingVideos = False
+      } ! (if List.length model.newVideos == 0 then
+        []
+      else
+        [ notify
+          ( (toString <| List.length model.newVideos) ++ " new videos"
+          , List.foldl
+            (\video message ->
+              message ++ " " ++ video.title ++ "."
+            )
+            "New videos:"
+            model.newVideos
+          , "newVideos"
+          )
+        ]
+      )
 
     AddVideos videos ->
-      { model
-        | channels = addVideosToChannels videos model.channels
-      } ! []
+      let
+        newVideos =
+          List.filter
+            (\video ->
+              case Dict.get video.channelId model.channels of
+                Nothing -> True
+                Just channel -> (findById video.id channel.videos) == Nothing
+            ) videos
+          ++ model.newVideos
+      in
+        { model
+          | channels = addVideosToChannels videos model.channels
+          , newVideos = newVideos
+        } ! []
 
     FilterChannels channelFilter ->
       { model | channelFilter = channelFilter } ! []
@@ -138,7 +182,11 @@ update msg model =
     FilterVideos videoFilter ->
       { model | videoFilter = videoFilter } ! []
 
-    SelectTab name -> { model | selectedTab = name } ! []
+    SelectTab name ->
+      { model
+      | selectedTab = name
+      , newVideos = if name == "main" then [] else model.newVideos
+      } ! []
 
 
 addChannelsToChannels : List Channel -> Dict String Channel -> Dict String Channel
@@ -180,6 +228,7 @@ subscriptions : Model -> Sub Msg
 subscriptions model =
   Sub.batch
     [ Sub.map AuthMsg <| Auth.subscriptions model.authorization
+    , Sub.map NotificationMsg <| Notification.subscriptions model.notification
     , Time.every Time.second Tick
     , subscribedChannels AddSubscribedChannels
     , channelFetchComplete (\_ -> ChannelFetchComplete)
