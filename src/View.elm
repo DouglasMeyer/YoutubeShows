@@ -2,7 +2,7 @@ module View exposing (root)
 
 import Types exposing (Model, Channel, Video, findById)
 import State exposing (indexToTab, tabToIndex, Msg(..))
-import Notification
+import Notification exposing (Permission(..))
 
 import Regex
 import Dict
@@ -24,7 +24,7 @@ root : Model -> Html State.Msg
 root model =
   let
     needsAuthorization = not model.authorization.isAuthorized && not model.authorization.isAuthorizing
-    needsNotificationPermission = Notification.needsNotificationPermission model.notification
+    needsNotificationPermission = model.notification.permission == Default
   in
     Layout.render Mdl
       model.mdl
@@ -89,17 +89,22 @@ about model =
           [ text "Sign in" ]
         ]
     notificationRow =
-      if Notification.needsNotificationPermission model.notification then
-        [ text "In order to receive notifications, you will need to "
-        , Button.render Mdl [1] model.mdl
-          [ Button.raised
-          , Button.colored
-          , Button.onClick <| GetNotificationPermission
+      case model.notification.permission of
+        Default ->
+          [ text "In order to receive notifications, you will need to "
+          , Button.render Mdl [1] model.mdl
+            [ Button.raised
+            , Button.colored
+            , Button.onClick <| GetNotificationPermission
+            ]
+            [ text "grant permission" ]
           ]
-          [ text "grant permission" ]
-        ]
-      else
-        [ text "You will receive notifications " ]
+        Granted ->
+          [ text "You will receive notifications." ]
+        Unsupported ->
+          [ text "Notifications aren't supported by your browser." ]
+        Denied ->
+          [ text "You denied notifications. Open your browser settings to enable them." ]
   in
     Grid.grid []
       [ Grid.cell [ Grid.offset All 3, Grid.size All 6 ]

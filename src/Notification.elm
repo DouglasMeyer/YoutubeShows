@@ -1,14 +1,14 @@
 port module Notification exposing
-  ( Model
+  ( Model, Permission(..)
   , init, Msg, update, subscriptions
   , requestPermission, notify
-  , needsNotificationPermission
   )
 
 type Permission
   = Default
   | Granted
   | Denied
+  | Unsupported
 
 type alias Model =
   { permission : Permission
@@ -19,10 +19,6 @@ init =
   Model
     Default
   ! [ checkPermission () ]
-
-needsNotificationPermission : Model -> Bool
-needsNotificationPermission model =
-  model.permission /= Granted
 
 type Msg
   = UpdatePermission String
@@ -51,6 +47,7 @@ stringToPermission permission =
   case permission of
     "granted" -> Granted
     "denied" -> Denied
+    "unsupported" -> Unsupported
     _ -> Default
 
 subscriptions : Model -> Sub Msg

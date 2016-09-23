@@ -36,14 +36,14 @@
   <link rel="stylesheet" href="shows.css">
 </head>
 
-<body>
-</body>
+<body><div id="youtube-shows"></div></body>
 
 <script type="text/javascript">
 /* globals localStorage Elm gapi Notification */
+var element = document.getElementById('youtube-shows');
 var storedState = localStorage.getItem('youtubeShows_storedState');
 var startingState = storedState ? JSON.parse(storedState) : null;
-var youtubeShows = Elm.YoutubeShows.fullscreen(startingState);
+var youtubeShows = Elm.YoutubeShows.embed(element, startingState);
 
 youtubeShows.ports.setStorage.subscribe(function(storedState){
   localStorage.setItem('youtubeShows_storedState', JSON.stringify(storedState));
@@ -199,16 +199,30 @@ var youtubePromise = gapiPromise.then(function(){
 
 // Notification
 youtubeShows.ports.checkPermission.subscribe(function(){
+  if (!window.Notification) {
+    youtubeShows.ports.updatePermission.send('unsupported');
+    return;
+  }
+
   youtubeShows.ports.updatePermission.send(Notification.permission);
 });
 
 youtubeShows.ports.requestPermission.subscribe(function(){
+  if (!window.Notification) {
+    youtubeShows.ports.updatePermission.send('unsupported');
+    return;
+  }
+
   Notification.requestPermission(function(permission){
     youtubeShows.ports.updatePermission.send(permission);
   });
 });
 
 youtubeShows.ports.notify.subscribe(function([ title, body, tag ]){
+  if (!window.Notification) {
+    return;
+  }
+
   new Notification(title, { body: body, tag: tag });
 });
 
