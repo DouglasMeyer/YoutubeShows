@@ -15294,11 +15294,9 @@ var _user$project$Notification$updatePermission = _elm_lang$core$Native_Platform
 var _user$project$Notification$Model = function (a) {
 	return {permission: a};
 };
+var _user$project$Notification$Unsupported = {ctor: 'Unsupported'};
 var _user$project$Notification$Denied = {ctor: 'Denied'};
 var _user$project$Notification$Granted = {ctor: 'Granted'};
-var _user$project$Notification$needsNotificationPermission = function (model) {
-	return !_elm_lang$core$Native_Utils.eq(model.permission, _user$project$Notification$Granted);
-};
 var _user$project$Notification$Default = {ctor: 'Default'};
 var _user$project$Notification$init = A2(
 	_elm_lang$core$Platform_Cmd_ops['!'],
@@ -15315,6 +15313,8 @@ var _user$project$Notification$stringToPermission = function (permission) {
 			return _user$project$Notification$Granted;
 		case 'denied':
 			return _user$project$Notification$Denied;
+		case 'unsupported':
+			return _user$project$Notification$Unsupported;
 		default:
 			return _user$project$Notification$Default;
 	}
@@ -16259,29 +16259,47 @@ var _user$project$View$mainView = function (model) {
 			]));
 };
 var _user$project$View$about = function (model) {
-	var notificationRow = _user$project$Notification$needsNotificationPermission(model.notification) ? _elm_lang$core$Native_List.fromArray(
-		[
-			_elm_lang$html$Html$text('In order to receive notifications, you will need to '),
-			A5(
-			_debois$elm_mdl$Material_Button$render,
-			_user$project$State$Mdl,
-			_elm_lang$core$Native_List.fromArray(
-				[1]),
-			model.mdl,
-			_elm_lang$core$Native_List.fromArray(
-				[
-					_debois$elm_mdl$Material_Button$raised,
-					_debois$elm_mdl$Material_Button$colored,
-					_debois$elm_mdl$Material_Button$onClick(_user$project$State$GetNotificationPermission)
-				]),
-			_elm_lang$core$Native_List.fromArray(
-				[
-					_elm_lang$html$Html$text('grant permission')
-				]))
-		]) : _elm_lang$core$Native_List.fromArray(
-		[
-			_elm_lang$html$Html$text('You will receive notifications ')
-		]);
+	var notificationRow = function () {
+		var _p1 = model.notification.permission;
+		switch (_p1.ctor) {
+			case 'Default':
+				return _elm_lang$core$Native_List.fromArray(
+					[
+						_elm_lang$html$Html$text('In order to receive notifications, you will need to '),
+						A5(
+						_debois$elm_mdl$Material_Button$render,
+						_user$project$State$Mdl,
+						_elm_lang$core$Native_List.fromArray(
+							[1]),
+						model.mdl,
+						_elm_lang$core$Native_List.fromArray(
+							[
+								_debois$elm_mdl$Material_Button$raised,
+								_debois$elm_mdl$Material_Button$colored,
+								_debois$elm_mdl$Material_Button$onClick(_user$project$State$GetNotificationPermission)
+							]),
+						_elm_lang$core$Native_List.fromArray(
+							[
+								_elm_lang$html$Html$text('grant permission')
+							]))
+					]);
+			case 'Granted':
+				return _elm_lang$core$Native_List.fromArray(
+					[
+						_elm_lang$html$Html$text('You will receive notifications.')
+					]);
+			case 'Unsupported':
+				return _elm_lang$core$Native_List.fromArray(
+					[
+						_elm_lang$html$Html$text('Notifications aren\'t supported by your browser.')
+					]);
+			default:
+				return _elm_lang$core$Native_List.fromArray(
+					[
+						_elm_lang$html$Html$text('You denied notifications. Open your browser settings to enable them.')
+					]);
+		}
+	}();
 	var signInRow = model.authorization.isAuthorized ? _elm_lang$core$Native_List.fromArray(
 		[
 			_elm_lang$html$Html$text('You are '),
@@ -16394,7 +16412,7 @@ var _user$project$View$about = function (model) {
 			]));
 };
 var _user$project$View$root = function (model) {
-	var needsNotificationPermission = _user$project$Notification$needsNotificationPermission(model.notification);
+	var needsNotificationPermission = _elm_lang$core$Native_Utils.eq(model.notification.permission, _user$project$Notification$Default);
 	var needsAuthorization = _elm_lang$core$Basics$not(model.authorization.isAuthorized) && _elm_lang$core$Basics$not(model.authorization.isAuthorizing);
 	return A4(
 		_debois$elm_mdl$Material_Layout$render,
@@ -16406,9 +16424,9 @@ var _user$project$View$root = function (model) {
 				_debois$elm_mdl$Material_Layout$selectedTab(
 				_user$project$State$tabToIndex(model.selectedTab)),
 				_debois$elm_mdl$Material_Layout$onSelectTab(
-				function (_p1) {
+				function (_p2) {
 					return _user$project$State$SelectTab(
-						_user$project$State$indexToTab(_p1));
+						_user$project$State$indexToTab(_p2));
 				})
 			]),
 		{
@@ -16467,8 +16485,8 @@ var _user$project$View$root = function (model) {
 			main: _elm_lang$core$Native_List.fromArray(
 				[
 					function () {
-					var _p2 = model.selectedTab;
-					if (_p2 === 'about') {
+					var _p3 = model.selectedTab;
+					if (_p3 === 'about') {
 						return _user$project$View$about(model);
 					} else {
 						return _user$project$View$mainView(model);
