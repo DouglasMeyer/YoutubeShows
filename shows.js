@@ -16231,15 +16231,31 @@ var _user$project$View$mainView = function (model) {
 		},
 		_elm_lang$core$Dict$values(model.channels));
 	return A2(
-		_elm_lang$html$Html$div,
+		_debois$elm_mdl$Material_Grid$grid,
+		_elm_lang$core$Native_List.fromArray(
+			[]),
 		_elm_lang$core$Native_List.fromArray(
 			[
-				_elm_lang$html$Html_Attributes$class('horizontal-layout')
-			]),
-		_elm_lang$core$Native_List.fromArray(
-			[
-				A3(_elm_lang$html$Html_Lazy$lazy2, _user$project$View$channelList, model.channelFilter, filteredChannels),
-				A4(_elm_lang$html$Html_Lazy$lazy3, _user$project$View$videosList, model, filteredChannels, model.videoFilter)
+				A2(
+				_debois$elm_mdl$Material_Grid$cell,
+				_elm_lang$core$Native_List.fromArray(
+					[
+						A2(_debois$elm_mdl$Material_Grid$size, _debois$elm_mdl$Material_Grid$All, 2)
+					]),
+				_elm_lang$core$Native_List.fromArray(
+					[
+						A3(_elm_lang$html$Html_Lazy$lazy2, _user$project$View$channelList, model.channelFilter, filteredChannels)
+					])),
+				A2(
+				_debois$elm_mdl$Material_Grid$cell,
+				_elm_lang$core$Native_List.fromArray(
+					[
+						A2(_debois$elm_mdl$Material_Grid$size, _debois$elm_mdl$Material_Grid$All, 10)
+					]),
+				_elm_lang$core$Native_List.fromArray(
+					[
+						A4(_elm_lang$html$Html_Lazy$lazy3, _user$project$View$videosList, model, filteredChannels, model.videoFilter)
+					]))
 			]));
 };
 var _user$project$View$about = function (model) {
