@@ -1,8 +1,4 @@
 
-.horizontal-layout {
-  display: flex;
-}
-
 .expand-layout {
   flex-grow: 1;
 }
@@ -33,23 +29,4 @@
 }
 .vertical-margin:last-child {
   margin-bottom: 1rem;
-}
-
-.sidebar {
-  position: fixed;
-  z-index: 5;
-  right: 0;
-  width: 300px;
-  height: 600px;
-  max-height: 100%;
-  margin: auto 0;
-  top: 0;
-  bottom: 0;
-  background-color: white;
-  box-shadow: 0 0 3px black;
-}
-.sidebar-ad-placeholder {
-  width: 300px;
-  height: 600px;
-  background: white url(https://placeholdit.imgix.net/~text?txtsize=33&txt=300%C3%97600&w=300&h=600) center / contain;
 }

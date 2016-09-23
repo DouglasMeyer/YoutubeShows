@@ -136,15 +136,11 @@ mainView model =
         |> Dict.values
         |> List.filter (\channel -> Regex.contains filterRegex channel.title)
   in
-    div
-      [ class "horizontal-layout"
-      ]
-      [ lazy2 channelList model.channelFilter filteredChannels
-      , lazy3
-        videosList
-        model
-        filteredChannels
-        model.videoFilter
+    Grid.grid []
+      [ Grid.cell [ Grid.size All 2 ]
+        [ lazy2 channelList model.channelFilter filteredChannels ]
+      , Grid.cell [ Grid.size All 10 ]
+        [ lazy3 videosList model filteredChannels model.videoFilter ]
       ]
 
 channelList : String -> List Channel -> Html State.Msg
